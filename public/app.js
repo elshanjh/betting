@@ -737,6 +737,18 @@ $('tabs').addEventListener('click', (e) => {
   showTab(b.dataset.tab);
   window.scrollTo({ top: 0 });
 });
+// Logo: back to the main page (Sports, all leagues, top of the list).
+$('homeLink').addEventListener('click', (e) => {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; // let "open in new tab" work
+  e.preventDefault();
+  Object.assign(S, { league: 'all', day: 'all', q: '', shown: PAGE, exp: null, showDone: false });
+  $('search').value = '';
+  Array.from($('days').children).forEach((x) => x.setAttribute('aria-pressed', x.dataset.day === 'all'));
+  openLeagues(false); openSheet(false);
+  showTab('matches');
+  renderLeagues(); renderMatches();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
 document.querySelector('.lang').addEventListener('click', (e) => { const b = e.target.closest('[data-lang]'); if (b) applyLang(b.dataset.lang, true); });
 $('wallet').addEventListener('submit', (e) => { e.preventDefault(); const i = $('nameIn'); if (i) join(i.value); });
 $('wallet').addEventListener('click', (e) => { if (e.target.closest('#claimBtn')) claim(); });

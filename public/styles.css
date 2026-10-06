@@ -25,7 +25,8 @@ input[type=text],input[type=number],input[type=email],input[type=password],input
 /* header bar */
 .bar{position:sticky;top:0;z-index:20;background:var(--bar);border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top,0)}
 .bar-in{max-width:1240px;margin:0 auto;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-.logo{display:flex;align-items:center;gap:8px;min-width:0}
+.logo{display:flex;align-items:center;gap:8px;min-width:0;color:inherit;text-decoration:none}
+.logo:hover .logo-mark{filter:brightness(1.1)}
 .logo-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:7px;background:var(--accent);color:var(--accent-ink);font-family:var(--display);font-weight:700;font-size:17px}
 .logo-name{font-family:var(--display);font-weight:600;font-size:21px;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap}
 .logo-name b{color:var(--accent);font-weight:700}
