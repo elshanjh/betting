@@ -12,8 +12,8 @@ Screen"). It runs entirely on free tiers:
 | **Firebase Hosting** | serves the app at `https://<project>.web.app` | free |
 | **Firebase Auth** | Google sign-in, one account per person | free |
 | **Cloud Firestore** | players, bets, fixtures, live leaderboard | free (Spark plan) |
-| **The Odds API** | real fixtures, bookmaker odds, final scores | free, 500 credits/month |
-| **GitHub Actions** | every 2 hours: load odds, fetch results, pay out winners | free |
+| **ESPN scoreboard feed** | real fixtures, DraftKings odds, final scores | free, no key |
+| **GitHub Actions** | every hour: load odds, fetch results, pay out winners | free |
 
 No Cloud Functions are used, so you never need the paid Blaze plan.
 
@@ -61,16 +61,17 @@ now live at `https://<your-project-id>.web.app`.
 
 ### 3. Real odds and results
 
-1. Sign up at <https://the-odds-api.com> (free plan) and copy your API key.
-2. In Firebase: **Project settings > Service accounts > Generate new private
+Odds and scores come from ESPN's public scoreboard feed, so there is no API
+key to get. The sync job only needs permission to write to your database:
+
+1. In Firebase: **Project settings > Service accounts > Generate new private
    key**. A JSON file downloads. **Never commit this file**; it can do
    anything to your database.
-3. In GitHub: **repo Settings > Secrets and variables > Actions > New
-   repository secret**, add:
-   - `ODDS_API_KEY`: the key from step 1
-   - `FIREBASE_SERVICE_ACCOUNT`: the whole content of the JSON file from step 2
-4. **Actions tab > Sync odds and results > Run workflow** to load fixtures
-   right away. After that it runs by itself every 2 hours.
+2. In GitHub: **repo Settings > Secrets and variables > Actions > New
+   repository secret**, name it `FIREBASE_SERVICE_ACCOUNT` and paste the whole
+   content of the JSON file.
+3. **Actions tab > Sync odds and results > Run workflow** to load fixtures
+   right away. After that it runs by itself every hour.
 
 ### 4. Invite your friends
 
@@ -82,17 +83,18 @@ their coins. To install it like an app:
 
 ## How it works
 
-- **Odds.** For each match the sync job takes the median 1X2 price across all
-  European bookmakers. The 81 extra markets (goals, both teams to score,
+- **Odds.** The 1X2 prices are DraftKings' moneyline odds as shown on ESPN,
+  converted to decimal. Matches without odds yet appear once ESPN has them. The 81 extra markets (goals, both teams to score,
   correct score, handicaps…) come from a Poisson goals model fitted to those
   prices, with a 7% margin. All prices are stored on the match, so the app
   and the security rules use exactly the same numbers.
-- **Betting closes at kickoff.** Odds refresh every 12 hours until then. A bet
+- **Betting closes at kickoff.** Odds refresh every hour until then. A bet
   keeps the price it was placed at.
-- **Settlement.** About 2 hours after kickoff the job asks for the final score,
+- **Settlement.** Once ESPN shows the match as finished, the job
   marks the match final and pays every winning bet `stake × odds`. Draw no
   bet refunds on a draw. A match with no result 60 hours after kickoff
-  (postponed, abandoned) is refunded.
+  and any postponed or abandoned match are refunded. Champions League
+  knockout ties settle on the score after extra time.
 - **Daily coins** reset at midnight UTC+4. To use another time zone change
   `DAY_OFFSET_HOURS` in `public/config.js` **and** `DAY_OFFSET_MS` in
   `firestore.rules`, then `npm run deploy`.
@@ -111,19 +113,18 @@ Firestore rules only let a player:
 Results and payouts are written only by the sync job. `npm test` checks all
 of this against the Firestore emulator.
 
-## API credits
+## Leagues and the data source
 
-The free Odds API plan has 500 credits a month. Each odds refresh costs 1
-credit per league, each results check 2. With the default 3 leagues
-(Premier League, La Liga, Serie A) that is roughly 180 credits for odds plus
-about 250 for results in a busy month. Results only get fetched while a
-match is waiting for its score, and when fewer than 40 credits are left the
-job stops refreshing odds so results can still come in.
+Default leagues: Premier League, La Liga, Serie A, Bundesliga, Ligue 1 and
+Champions League. To change them, set `LEAGUES` in
+`.github/workflows/sync.yml` to a comma list of ESPN slugs, for example
+`eng.1,eng.2,tur.1,uefa.europa`. The slug is the part of an ESPN URL like
+`espn.com/soccer/league/_/name/eng.1`.
 
-To change leagues, set `LEAGUES` in `.github/workflows/sync.yml` to a comma
-list of [sport keys](https://the-odds-api.com/sports-odds-data/sports-apis.html),
-for example `soccer_epl,soccer_uefa_champs_league`. More leagues use more
-credits; the paid plan starts at 20,000 a month.
+ESPN's feed is free and unlimited but unofficial: it is what espn.com uses
+itself, not a documented API, so ESPN could change it. If that happens the
+sync job fails loudly in the Actions tab, and only `scripts/sync.mjs` needs
+updating.
 
 ## Local development
 
@@ -135,7 +136,7 @@ npx firebase emulators:start --only auth,firestore,hosting --project demo-stakes
 
 In emulator mode Google sign-in shows a fake account picker, and the database
 starts empty. To fill it with fixtures, run the sync job against the emulator:
-`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-stakes ODDS_API_KEY=<key> npm run sync`.
+`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-stakes npm run sync`.
 
 ## Ideas for later
 

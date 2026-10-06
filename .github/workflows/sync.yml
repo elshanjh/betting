@@ -1,12 +1,11 @@
-# Every 2 hours: fetch fixtures/odds and results, settle bets.
-# Needs two repository secrets (Settings > Secrets and variables > Actions):
-#   ODDS_API_KEY              your key from the-odds-api.com
+# Every hour: load fixtures + odds and final scores from ESPN, settle bets.
+# Needs one repository secret (Settings > Secrets and variables > Actions):
 #   FIREBASE_SERVICE_ACCOUNT  the full JSON of a Firebase service account key
 name: Sync odds and results
 
 on:
   schedule:
-    - cron: '17 */2 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -25,7 +24,6 @@ jobs:
       - run: npm install --omit=dev --no-audit --no-fund
       - run: node scripts/sync.mjs
         env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          # Optional overrides, see scripts/sync.mjs:
-          # LEAGUES: soccer_epl,soccer_spain_la_liga,soccer_italy_serie_a
+          # Optional, ESPN league slugs (see README):
+          # LEAGUES: eng.1,esp.1,ita.1,ger.1,fra.1,uefa.champions
