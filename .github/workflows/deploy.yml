@@ -28,6 +28,8 @@ jobs:
           echo "PROJECT_ID=$(node -p "require('$RUNNER_TEMP/sa.json').project_id")" >> "$GITHUB_ENV"
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - name: Check permissions
+        run: node scripts/check-permissions.mjs
       - name: Fill in the web config
         run: node scripts/web-config.mjs "$PROJECT_ID"
       - name: Deploy
