@@ -30,6 +30,7 @@
 
   <nav class="tabs" id="tabs" aria-label="Sections">
     <button data-tab="matches" aria-selected="true">Fixtures</button>
+    <button data-tab="live" aria-selected="false"><span class="dot" aria-hidden="true"></span>Live <span class="badge red" id="liveCount" hidden></span></button>
     <button data-tab="mine" aria-selected="false">My bets <span class="badge" id="openCount" hidden></span></button>
     <button data-tab="board" aria-selected="false">Table</button>
   </nav>
@@ -48,6 +49,10 @@
           <input type="search" id="search" placeholder="Search a team" autocomplete="off" aria-label="Search a team">
         </div>
         <div class="list" id="matches"><div class="empty">Loading this week's matches…</div></div>
+      </section>
+      <section class="panel" id="p-live">
+        <h2>Live now</h2>
+        <div id="live"><div class="empty">Loading live matches…</div></div>
       </section>
       <section class="panel" id="p-mine">
         <h2>My bets</h2>
@@ -78,6 +83,20 @@
     <div class="dlg-actions">
       <button class="btn ghost" value="cancel">Cancel</button>
       <button class="btn" value="ok" id="confirmOk">Yes, place it</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="accountDlg" aria-labelledby="accountTitle">
+  <form method="dialog" class="dlg" id="accountForm">
+    <h2 id="accountTitle">Your account</h2>
+    <p class="muted" id="accountWho"></p>
+    <label class="field">Name on the table<input type="text" id="accountName" maxlength="20" autocomplete="nickname"></label>
+    <div class="dlg-actions">
+      <button class="btn danger" value="logout" id="logoutBtn">Log out</button>
+      <span class="grow"></span>
+      <button class="btn ghost" value="cancel">Close</button>
+      <button class="btn" value="save" id="accountSave">Save name</button>
     </div>
   </form>
 </dialog>

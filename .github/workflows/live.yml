@@ -1,0 +1,27 @@
+# Live engine: checks every 10 minutes whether a match is live or about to
+# kick off; if so it keeps running (updating scores and live odds every 20s)
+# until the last one ends. Free for public repos. Uses FIREBASE_SERVICE_ACCOUNT.
+name: Live engine
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: node scripts/live.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

@@ -36,19 +36,20 @@ function fitGrid(o) {
   let ph = 1 / o.h, pd = 1 / o.d, pa = 1 / o.a;
   const s = ph + pd + pa;
   ph /= s; pd /= s; pa /= s;
-  let lo = 0.6, hi = 6, g;
+  let lo = 0.6, hi = 6, g, lh, la;
   for (let i = 0; i < 22; i++) {
     const T = (lo + hi) / 2;
     let a = 0.02, b = 0.98;
     for (let j = 0; j < 22; j++) {
       const sp = (a + b) / 2;
-      g = grid(T * sp, T * (1 - sp));
+      lh = T * sp; la = T * (1 - sp);
+      g = grid(lh, la);
       const r = hda(g);
       if (r[0] - r[2] < ph - pa) a = sp; else b = sp;
     }
     if (hda(g)[1] > pd) lo = T; else hi = T;
   }
-  return g;
+  return { g, lh, la };
 }
 
 // 'won' | 'lost' | 'void' for selection key k given the final score h-a.
@@ -125,6 +126,7 @@ export function markets(home, away) {
 }
 
 export function selLabel(home, away, k) {
+  if (k.startsWith('lv:')) return liveLabel(home, away, k);
   if (k === '1x2:h') return home;
   if (k === '1x2:a') return away;
   if (k === '1x2:d') return 'Draw';
@@ -138,7 +140,7 @@ export function selLabel(home, away, k) {
 // a bet whose odds equal the stored price.
 export function priceMap(home, away, o) {
   const p = { '1x2:h': o.h, '1x2:d': o.d, '1x2:a': o.a };
-  const g = fitGrid(o);
+  const { g } = fitGrid(o);
   markets(home, away).forEach((grp) => grp.sels.forEach((s) => {
     let w = 0, v = 0;
     g.forEach((c) => { const r = outcome(s[0], c[0], c[1]); if (r === 'won') w += c[2]; else if (r === 'void') v += c[2]; });
@@ -180,7 +182,7 @@ export function judge(legs, matches) {
     const m = matches[l.m];
     if (!m || m.status === 'scheduled') return 'open';
     if (m.status === 'void') return 'void';
-    return outcome(l.k, m.sh, m.sa);
+    return l.k.startsWith('lv:') ? liveOutcome(l, m) : outcome(l.k, m.sh, m.sa);
   });
   if (new Set(legs.map((l) => l.m)).size !== legs.length) return { status: 'void', res, odds: 1 };
   if (res.includes('lost')) return { status: 'lost', res, odds: 0 };
@@ -188,4 +190,77 @@ export function judge(legs, matches) {
   const live = legs.filter((l, i) => res[i] === 'won').map((l) => l.o);
   if (!live.length) return { status: 'void', res, odds: 1 };
   return { status: 'won', res, odds: comboOdds(live) };
+}
+
+/* ---------- live betting ---------- */
+// Live prices come from the same goals model: the pre-match goal rates,
+// scaled to the time left, added to the current score.
+
+export const LIVE_CLOSE_MIN = 85; // no live bets from this minute on
+
+export function livePrices(o, sh, sa, min) {
+  const { lh, la } = fitGrid(o);
+  const t = Math.max(0.01, (94 - Math.min(min, 93)) / 94); // share of the match left, incl. stoppage time
+  const g = grid(lh * t, la * t).map(([i, j, p]) => [sh + i, sa + j, p]);
+  const out = {};
+  const odd = (p) => (p >= 0.0099 ? Math.min(101, Math.max(1.01, Math.round((MARGIN * 100) / p) / 100)) : null);
+  const put = (k, p) => { const v = odd(p); if (v && v > 1.01) out[k] = v; };
+  const P = (f) => g.reduce((s, c) => s + (f(c[0], c[1]) ? c[2] : 0), 0);
+  put('lv:1x2:h', P((h, a) => h > a)); put('lv:1x2:d', P((h, a) => h === a)); put('lv:1x2:a', P((h, a) => h < a));
+  put('lv:dc:1x', P((h, a) => h >= a)); put('lv:dc:12', P((h, a) => h !== a)); put('lv:dc:x2', P((h, a) => h <= a));
+  const none = Math.exp(-(lh + la) * t), share = lh / (lh + la);
+  put('lv:ng:h', (1 - none) * share); put('lv:ng:n', none); put('lv:ng:a', (1 - none) * (1 - share));
+  const tot = sh + sa;
+  [0.5, 1.5, 2.5].forEach((d) => { const L = tot + d; put('lv:ou:' + L + ':o', P((h, a) => h + a > L)); put('lv:ou:' + L + ':u', P((h, a) => h + a < L)); });
+  if (!(sh > 0 && sa > 0)) { put('lv:btts:y', P((h, a) => h > 0 && a > 0)); put('lv:btts:n', P((h, a) => !(h > 0 && a > 0))); }
+  return out;
+}
+
+// Groups to show for a live match: [{ name, sels: [[key, short]] }], only keys with a price.
+export function liveMarkets(home, away, p) {
+  const G = [
+    ['Match result', [['lv:1x2:h', '1'], ['lv:1x2:d', 'X'], ['lv:1x2:a', '2']]],
+    ['Next goal', [['lv:ng:h', home], ['lv:ng:n', 'No more goals'], ['lv:ng:a', away]]],
+    ['Total goals', Object.keys(p).filter((k) => k.startsWith('lv:ou:')).sort((x, y) => parseFloat(x.split(':')[2]) - parseFloat(y.split(':')[2]) || (x < y ? -1 : 1))
+      .map((k) => [k, (k.endsWith(':o') ? 'Over ' : 'Under ') + k.split(':')[2]])],
+    ['Double chance', [['lv:dc:1x', '1X'], ['lv:dc:12', '12'], ['lv:dc:x2', 'X2']]],
+    ['Both teams to score', [['lv:btts:y', 'Yes'], ['lv:btts:n', 'No']]],
+  ];
+  return G.map(([name, sels]) => ({ name, sels: sels.filter((s) => p[s[0]] != null) })).filter((g) => g.sels.length);
+}
+
+function liveLabel(home, away, k) {
+  const p = k.split(':');
+  const side = (x) => (x === 'h' ? home : x === 'a' ? away : 'Draw');
+  let s;
+  if (p[1] === '1x2') s = side(p[2]);
+  else if (p[1] === 'dc') s = p[2] === '1x' ? home + ' or draw' : p[2] === '12' ? home + ' or ' + away : 'Draw or ' + away;
+  else if (p[1] === 'ng') s = p[2] === 'n' ? 'No more goals' : 'Next goal: ' + side(p[2]);
+  else if (p[1] === 'ou') s = (p[3] === 'o' ? 'Over ' : 'Under ') + p[2] + ' goals';
+  else if (p[1] === 'btts') s = 'Both teams to score: ' + (p[2] === 'y' ? 'yes' : 'no');
+  else s = k;
+  return s + ' (live)';
+}
+
+// A live pick records the score (sc) and match clock in seconds (t) it was
+// placed at. Live data can lag the TV by a minute or so, so if the goal
+// timeline shows any goal up to LIVE_GRACE seconds after t that the pick's
+// score doesn't include, the pick is void (refund): it may have been placed
+// by someone who had already seen that goal.
+// `m.goals` is [{ s: 'h'|'a', t: seconds }] or null when ESPN gave no timeline.
+export const LIVE_GRACE = 120;
+export function liveOutcome(l, m) {
+  const goals = m.goals ? m.goals.slice().sort((x, y) => x.t - y.t) : null;
+  const k = l.k.split(':');
+  if (goals) {
+    const by = goals.filter((g) => g.t <= l.t + LIVE_GRACE);
+    const before = goals.filter((g) => g.t <= l.t), h = before.filter((g) => g.s === 'h').length;
+    if (h !== l.sc[0] || before.length - h !== l.sc[1] || by.length !== before.length) return 'void';
+  }
+  if (k[1] === 'ng') {
+    if (!goals) return 'void';
+    const next = goals[l.sc[0] + l.sc[1]];
+    return (next ? next.s : 'n') === k[2] ? 'won' : 'lost';
+  }
+  return outcome(k.slice(1).join(':'), m.sh, m.sa);
 }

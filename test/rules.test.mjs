@@ -104,3 +104,43 @@ test('nobody can settle bets or edit matches from the app', async () => {
   await assertFails(setDoc(doc(db, 'matches/m3'), { home: 'x' }));
   await assertFails(updateDoc(doc(db, 'matches/m1'), { status: 'final' }));
 });
+
+/* ---------- live bets ---------- */
+async function seedLive(over = {}) {
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'live/m2'), {
+    home: 'Inter', away: 'Milan', sh: 1, sa: 0, min: 60, clk: 3540, susp: false, done: false,
+    p: { 'lv:1x2:h': 1.4, 'lv:ng:a': 3.1 }, at: Timestamp.now(), ...over,
+  }));
+}
+function liveBet(db, { k = 'lv:1x2:h', o = 1.4, sc = [1, 0], t = 3540, live = true, extra = [] } = {}) {
+  const ref = doc(collection(db, 'bets'));
+  const legs = [{ m: 'm2', k, o, label: 'x', fx: 'Inter v Milan', sc, t }, ...extra];
+  const b = writeBatch(db);
+  const bet = { uid: 'alice', name: 'x', legs, mids: legs.map((l) => l.m), stake: 10, odds: o, status: 'open', placed: serverTimestamp() };
+  if (live !== null) bet.live = live;
+  b.set(ref, bet);
+  b.update(doc(db, 'players/alice'), { coins: 90, lastBet: ref.id });
+  return b.commit();
+}
+
+test('live bets at the live price go through', async () => {
+  await seedLive();
+  await assertSucceeds(liveBet(as('alice')));
+});
+
+test('bad live bets are rejected', async () => {
+  await seedLive();
+  const db = as('alice');
+  await assertFails(liveBet(db, { o: 5 }));                      // wrong price
+  await assertFails(liveBet(db, { sc: [0, 0] }));                // wrong score
+  await assertFails(liveBet(db, { t: 3000 }));                   // wrong clock
+  await assertFails(liveBet(db, { k: '1x2:h', o: 1.4 }));        // not a live market
+  await assertFails(liveBet(db, { live: null }));                // live pick validated as pre-match
+  await assertFails(liveBet(db, { extra: [{ m: 'm1', k: '1x2:h', o: P['1x2:h'], label: 'x', fx: 'x' }] })); // live multi
+  await seedLive({ susp: true });
+  await assertFails(liveBet(db));                                // suspended
+  await seedLive({ at: Timestamp.fromMillis(Date.now() - 120e3) });
+  await assertFails(liveBet(db));                                // stale live data
+  await seedLive({ done: true });
+  await assertFails(liveBet(db));                                // match over
+});

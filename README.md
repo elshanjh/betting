@@ -126,6 +126,29 @@ ESPN's feed and eloratings.net are free and need no key, but neither is an
 official API, so they could change. If that happens the sync job fails
 loudly in the Actions tab, and only `scripts/sync.mjs` needs updating.
 
+## Live betting
+
+The **Live** tab lists matches being played right now (top leagues, European
+cups, national teams and more European leagues) with the score, the clock
+and live odds for the result, next goal, total goals, double chance and both
+teams to score. Live bets are singles.
+
+- `scripts/live.mjs` runs in GitHub Actions (`.github/workflows/live.yml`).
+  It wakes every 10 minutes; if a match is live or about to start it stays
+  up, polling ESPN every 20 seconds and writing `live/{matchId}`, until the
+  last match ends, then pays out immediately. Public repos get unlimited
+  free Actions minutes; on a private repo this would use up the free quota.
+- Live odds come from the same goals model as the extra markets: the
+  pre-match goal rates, scaled to the time left, on top of the score.
+- Betting pauses for a minute after a goal and closes at the 85th minute.
+- Live data runs a little behind TV. A live bet records the score and match
+  clock it was placed at; if a goal turns up in the timeline within 2
+  minutes of that clock (so someone could have seen it already), the bet is
+  refunded. The rules only accept live bets at the current live price, from
+  live data less than a minute old.
+- GitHub can start scheduled runs a few minutes late, so live odds may
+  appear a few minutes after kickoff.
+
 ## Multi-bets
 
 Tap prices on different matches to fill the bet slip (side panel on a

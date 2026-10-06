@@ -11,7 +11,8 @@
 
 import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import { priceMap, eloOdds, judge } from '../public/markets.js';
+import { priceMap, eloOdds } from '../public/markets.js';
+import { parse, settle } from './lib.mjs';
 import { LEAGUES, BY_SLUG } from '../public/leagues.js';
 
 const env = process.env;
@@ -46,22 +47,6 @@ async function get(url, type = 'json') {
 
 /* ---------- odds ---------- */
 
-// American odds ("-265", "+390", 250) to decimal (1.38, 4.9, 3.5).
-function dec(x) {
-  const n = Number(String(x).replace('+', ''));
-  if (!Number.isFinite(n) || (n > -100 && n < 100)) return null;
-  return Math.round((n > 0 ? 1 + n / 100 : 1 + 100 / -n) * 100) / 100;
-}
-
-function bookOdds(c) {
-  const o = (c.odds || [])[0];
-  if (!o) return null;
-  const ml = o.moneyline || {};
-  const pick = (side, fallback) => dec(ml[side]?.close?.odds ?? ml[side]?.open?.odds ?? fallback);
-  const r = { h: pick('home', o.homeTeamOdds?.moneyLine), d: pick('draw', o.drawOdds?.moneyLine), a: pick('away', o.awayTeamOdds?.moneyLine) };
-  return r.h && r.d && r.a ? r : null;
-}
-
 // World Football Elo, loaded once per run when a national-team match needs it.
 const norm = (s) => s.normalize('NFKD').replace(/[^\x00-\x7f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
 const ALIASES = {
@@ -88,18 +73,6 @@ async function modelOdds(e) {
 }
 
 /* ---------- ESPN ---------- */
-
-function parse(league, ev) {
-  const c = ev.competitions?.[0];
-  if (!c) return null;
-  const home = c.competitors.find((x) => x.homeAway === 'home'), away = c.competitors.find((x) => x.homeAway === 'away');
-  if (!home || !away) return null;
-  return {
-    id: 'espn_' + ev.id, league, ko: Date.parse(c.date || ev.date), status: c.status?.type?.name, neutral: !!c.neutralSite,
-    home: home.team.displayName, away: away.team.displayName,
-    sh: parseInt(home.score, 10), sa: parseInt(away.score, 10), o: bookOdds(c),
-  };
-}
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -143,7 +116,7 @@ async function syncLeague(slug, stored) {
   for (const m of pending) {
     const e = events.get(m.id);
     if (e && DONE.has(e.status) && Number.isInteger(e.sh) && Number.isInteger(e.sa)) {
-      await db.doc('matches/' + m.id).update({ status: 'final', sh: e.sh, sa: e.sa, settled: false });
+      await db.doc('matches/' + m.id).update({ status: 'final', sh: e.sh, sa: e.sa, goals: e.goals, settled: false });
       console.log('final: ' + m.home + ' ' + e.sh + '-' + e.sa + ' ' + m.away);
     } else if ((e && OFF.has(e.status)) || now - m.ko.toMillis() > VOID_AFTER_MS) {
       await db.doc('matches/' + m.id).update({ status: 'void', settled: false });
@@ -151,47 +124,6 @@ async function syncLeague(slug, stored) {
     }
   }
   if (fixtures || pending.length) console.log(slug + ': ' + fixtures + ' fixtures, ' + written + ' updated, ' + pending.length + ' awaiting result');
-}
-
-/* ---------- settlement ---------- */
-
-const legsOf = (b) => b.legs || [{ m: b.matchId, k: b.key, o: b.odds, label: b.label, fx: b.fixture }];
-
-async function settle() {
-  const snap = await db.collection('matches').where('settled', '==', false).get();
-  const cache = {};
-  const match = async (id) => {
-    if (!(id in cache)) { const d = await db.doc('matches/' + id).get(); cache[id] = d.exists ? d.data() : null; }
-    return cache[id];
-  };
-  for (const md of snap.docs) {
-    const [a, b] = await Promise.all([
-      db.collection('bets').where('mids', 'array-contains', md.id).where('status', '==', 'open').get(),
-      db.collection('bets').where('matchId', '==', md.id).where('status', '==', 'open').get(), // bets from before multi-bets
-    ]);
-    const docs = [...a.docs, ...b.docs];
-    let batch = db.batch(), ops = 0, done = 0;
-    for (const bd of docs) {
-      const bet = bd.data(), legs = legsOf(bet), ms = {};
-      for (const l of legs) ms[l.m] = await match(l.m);
-      const j = judge(legs, ms);
-      if (j.status === 'open') { batch.update(bd.ref, { res: j.res }); ops++; continue; }
-      const payout = j.status === 'won' ? Math.round(bet.stake * j.odds) : j.status === 'void' ? bet.stake : 0;
-      const upd = { status: j.status, res: j.res, payout, settledAt: FieldValue.serverTimestamp() };
-      if (legs.length === 1 && ms[legs[0].m]?.status === 'final') upd.score = ms[legs[0].m].sh + '-' + ms[legs[0].m].sa;
-      batch.update(bd.ref, upd);
-      const pu = { coins: FieldValue.increment(payout) };
-      if (j.status === 'won') pu.won = FieldValue.increment(1);
-      if (j.status === 'lost') pu.lost = FieldValue.increment(1);
-      batch.update(db.doc('players/' + bet.uid), pu);
-      ops += 2; done++;
-      if (ops >= 400) { await batch.commit(); batch = db.batch(); ops = 0; }
-    }
-    batch.update(md.ref, { settled: true });
-    await batch.commit();
-    const m = md.data();
-    console.log('settled ' + done + ' of ' + docs.length + ' bets touching ' + m.home + ' v ' + m.away);
-  }
 }
 
 /* ---------- main ---------- */
@@ -208,7 +140,7 @@ async function main() {
       try { await syncLeague(slug, stored); } catch (e) { failed++; console.error(slug + ': ' + e.message); }
     }
   }));
-  await settle();
+  await settle(db);
   await db.doc('meta/sync').set({ ranAt: Date.now(), source: 'espn', failed });
   if (failed > SLUGS.length / 2) throw new Error(failed + ' of ' + SLUGS.length + ' leagues failed; is the ESPN feed down or changed?');
   console.log('done (' + failed + ' leagues failed)');

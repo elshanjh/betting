@@ -1,6 +1,6 @@
 // Minimal service worker: makes the app installable and lets the shell open
 // offline. Network first, so a new deploy shows up on the next launch.
-const CACHE = 'stakes-v4';
+const CACHE = 'stakes-v5';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'markets.js', 'leagues.js', 'sass.js', 'config.js', 'manifest.webmanifest', 'icons/icon.svg'];
 
 self.addEventListener('install', (e) => {
