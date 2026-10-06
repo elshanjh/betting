@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// Players can only do three things to their own coins: claim 100 once a day,
+// pay the stake of a bet they place, or rename themselves. Results, payouts
+// and match odds are written only by the sync job (scripts/sync.mjs), which
+// uses the Admin SDK and is not bound by these rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // Day number for the daily claim. DAY_OFFSET_MS must match
+    // DAY_OFFSET_HOURS in public/config.js (4 hours = 14400000).
+    function today() {
+      let DAY_OFFSET_MS = 14400000;
+      return math.floor((request.time.toMillis() + DAY_OFFSET_MS) / 86400000);
+    }
+
+    function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
+    function playerPath(uid) { return /databases/$(database)/documents/players/$(uid); }
+    function betPath(id) { return /databases/$(database)/documents/bets/$(id); }
+
+    match /matches/{matchId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /players/{uid} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'coins', 'lastClaimDay', 'won', 'lost', 'joined'])
+        && validName(request.resource.data.name)
+        && request.resource.data.coins == 0
+        && request.resource.data.lastClaimDay == 0
+        && request.resource.data.won == 0
+        && request.resource.data.lost == 0
+        && request.resource.data.joined == request.time;
+
+      allow update: if signedIn() && request.auth.uid == uid
+        && (isClaim() || isBet() || isRename());
+
+      allow delete: if false;
+
+      function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+      function isClaim() {
+        return changed().hasOnly(['coins', 'lastClaimDay'])
+          && resource.data.lastClaimDay < today()
+          && request.resource.data.lastClaimDay == today()
+          && request.resource.data.coins == resource.data.coins + 100;
+      }
+
+      // The stake leaves the wallet only together with a new bet document
+      // written in the same batch, and the player doc points at that bet.
+      function isBet() {
+        return changed().hasOnly(['coins', 'lastBet'])
+          && changed().hasAll(['coins', 'lastBet'])
+          && paysFor(request.resource.data.lastBet);
+      }
+
+      function paysFor(betId) {
+        let bet = getAfter(betPath(betId)).data;
+        return betId is string
+          && !exists(betPath(betId))
+          && existsAfter(betPath(betId))
+          && bet.uid == uid
+          && request.resource.data.coins == resource.data.coins - bet.stake
+          && request.resource.data.coins >= 0;
+      }
+
+      function isRename() {
+        return changed().hasOnly(['name']) && validName(request.resource.data.name);
+      }
+    }
+
+    match /bets/{betId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() && isValidBet(request.resource.data);
+      allow update, delete: if false;
+
+      function isValidBet(b) {
+        let me = playerPath(request.auth.uid);
+        let m = get(/databases/$(database)/documents/matches/$(b.matchId)).data;
+        return b.keys().hasOnly(['uid', 'name', 'matchId', 'key', 'label', 'fixture', 'stake', 'odds', 'status', 'placed'])
+          && b.uid == request.auth.uid
+          && b.status == 'open'
+          && b.placed == request.time
+          && b.stake is int && b.stake >= 1
+          && b.name is string && b.name.size() <= 20
+          && b.label is string && b.label.size() <= 120
+          && b.fixture is string && b.fixture.size() <= 120
+          && b.matchId is string
+          && b.key is string
+          // the match is still open and the odds are exactly the published price
+          && m.status == 'scheduled'
+          && m.ko > request.time
+          && b.key in m.p
+          && b.odds == m.p[b.key]
+          // the stake is paid for in the same batch
+          && getAfter(me).data.lastBet == betId
+          && getAfter(me).data.coins == get(me).data.coins - b.stake;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

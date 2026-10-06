@@ -1,0 +1,146 @@
+# Friendly Stakes
+
+Bet on real football fixtures with pretend coins. Everyone claims 100 free
+coins a day, bets on real matches at real bookmaker odds, and climbs the
+table. Coins can't be bought or cashed out.
+
+It's a web app that installs on a phone like a normal app ("Add to Home
+Screen"). It runs entirely on free tiers:
+
+| Piece | What it does | Cost |
+|---|---|---|
+| **Firebase Hosting** | serves the app at `https://<project>.web.app` | free |
+| **Firebase Auth** | Google sign-in, one account per person | free |
+| **Cloud Firestore** | players, bets, fixtures, live leaderboard | free (Spark plan) |
+| **The Odds API** | real fixtures, bookmaker odds, final scores | free, 500 credits/month |
+| **GitHub Actions** | every 2 hours: load odds, fetch results, pay out winners | free |
+
+No Cloud Functions are used, so you never need the paid Blaze plan.
+
+```
+public/            the app (no build step)
+  app.js           UI + Firestore reads/writes
+  markets.js       odds model + settlement rules (shared with the sync job)
+  config.js        your Firebase config goes here
+scripts/sync.mjs   odds + results + settlement (runs in GitHub Actions)
+firestore.rules    anti-cheat: players can't give themselves coins
+test/              rule tests + sync tests (npm test)
+```
+
+## Setup (about 20 minutes)
+
+### 1. Firebase project
+
+1. Go to <https://console.firebase.google.com>, **Create a project**. You can
+   turn Google Analytics off.
+2. **Build > Authentication > Get started > Sign-in method > Google > Enable.**
+3. **Build > Firestore Database > Create database.** Pick a location near you
+   (for example `eur3` for Europe) and start in **production mode**.
+4. **Project settings (gear icon) > General > Your apps > Web (`</>`)**.
+   Register the app (name it anything, no need to tick Hosting here) and copy
+   the `firebaseConfig` values into `public/config.js`.
+
+### 2. Deploy the app
+
+You need Node.js 20+ on your computer.
+
+```bash
+git clone https://github.com/elshanjh/betting && cd betting
+npm install
+npx firebase login
+```
+
+Put your project ID in `.firebaserc` (replace `PASTE_YOUR_PROJECT_ID`), then:
+
+```bash
+npm run deploy
+```
+
+This uploads the app, the security rules and the database index. The app is
+now live at `https://<your-project-id>.web.app`.
+
+### 3. Real odds and results
+
+1. Sign up at <https://the-odds-api.com> (free plan) and copy your API key.
+2. In Firebase: **Project settings > Service accounts > Generate new private
+   key**. A JSON file downloads. **Never commit this file**; it can do
+   anything to your database.
+3. In GitHub: **repo Settings > Secrets and variables > Actions > New
+   repository secret**, add:
+   - `ODDS_API_KEY`: the key from step 1
+   - `FIREBASE_SERVICE_ACCOUNT`: the whole content of the JSON file from step 2
+4. **Actions tab > Sync odds and results > Run workflow** to load fixtures
+   right away. After that it runs by itself every 2 hours.
+
+### 4. Invite your friends
+
+Send them the `web.app` link. They sign in with Google, pick a name and claim
+their coins. To install it like an app:
+
+- **iPhone:** open in Safari > Share > **Add to Home Screen**
+- **Android:** open in Chrome > menu > **Install app**
+
+## How it works
+
+- **Odds.** For each match the sync job takes the median 1X2 price across all
+  European bookmakers. The 81 extra markets (goals, both teams to score,
+  correct score, handicaps…) come from a Poisson goals model fitted to those
+  prices, with a 7% margin. All prices are stored on the match, so the app
+  and the security rules use exactly the same numbers.
+- **Betting closes at kickoff.** Odds refresh every 12 hours until then. A bet
+  keeps the price it was placed at.
+- **Settlement.** About 2 hours after kickoff the job asks for the final score,
+  marks the match final and pays every winning bet `stake × odds`. Draw no
+  bet refunds on a draw. A match with no result 60 hours after kickoff
+  (postponed, abandoned) is refunded.
+- **Daily coins** reset at midnight UTC+4. To use another time zone change
+  `DAY_OFFSET_HOURS` in `public/config.js` **and** `DAY_OFFSET_MS` in
+  `firestore.rules`, then `npm run deploy`.
+
+### Anti-cheat
+
+Anyone can open the browser console, so the app itself is not trusted. The
+Firestore rules only let a player:
+
+- join with 0 coins,
+- add exactly 100 coins once per day,
+- pay for a bet, and only in the same write that creates the bet, at the
+  exact published price, before kickoff, with no more coins than they have,
+- change their name.
+
+Results and payouts are written only by the sync job. `npm test` checks all
+of this against the Firestore emulator.
+
+## API credits
+
+The free Odds API plan has 500 credits a month. Each odds refresh costs 1
+credit per league, each results check 2. With the default 3 leagues
+(Premier League, La Liga, Serie A) that is roughly 180 credits for odds plus
+about 250 for results in a busy month. Results only get fetched while a
+match is waiting for its score, and when fewer than 40 credits are left the
+job stops refreshing odds so results can still come in.
+
+To change leagues, set `LEAGUES` in `.github/workflows/sync.yml` to a comma
+list of [sport keys](https://the-odds-api.com/sports-odds-data/sports-apis.html),
+for example `soccer_epl,soccer_uefa_champs_league`. More leagues use more
+credits; the paid plan starts at 20,000 a month.
+
+## Local development
+
+```bash
+npm test                                          # rule + sync tests (needs Java)
+npx firebase emulators:start --only auth,firestore,hosting --project demo-stakes
+# then open http://localhost:5000/?emulator
+```
+
+In emulator mode Google sign-in shows a fake account picker, and the database
+starts empty. To fill it with fixtures, run the sync job against the emulator:
+`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-stakes ODDS_API_KEY=<key> npm run sync`.
+
+## Ideas for later
+
+- Push notifications when bets settle (Firebase Cloud Messaging).
+- Private leagues: a `groups` collection and a join code.
+- Accumulators (multi-bets).
+- App Store / Play Store versions with Capacitor. Not needed to use it on a
+  phone, and simulated-gambling apps get extra scrutiny in store review.
