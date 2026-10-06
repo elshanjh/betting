@@ -60,4 +60,17 @@ export const LEAGUES = [
   ['conmebol.libertadores', 'Copa Libertadores', '🏆', 'Rest of the world'],
 ].map(([slug, name, flag, group, nat]) => ({ slug, name, flag, group, nat: !!nat }));
 
+// Country of each league as a flagcdn.com code (emoji flags don't render on
+// Windows and some Android phones). Competitions without one keep the emoji.
+const CC = { eng: 'gb-eng', sco: 'gb-sct', esp: 'es', ita: 'it', ger: 'de', fra: 'fr', tur: 'tr', ned: 'nl', por: 'pt', bel: 'be', gre: 'gr',
+  aut: 'at', den: 'dk', usa: 'us', bra: 'br', arg: 'ar', mex: 'mx', ksa: 'sa', uefa: 'eu' };
+LEAGUES.forEach((l) => { l.cc = l.slug === 'uefa.nations' || l.slug === 'uefa.euro' || l.slug === 'uefa.euroq' || !l.nat ? CC[l.slug.split('.')[0]] || '' : ''; });
+
 export const BY_SLUG = Object.fromEntries(LEAGUES.map((l) => [l.slug, l]));
+
+// Flag image (or emoji) for a league slug.
+export function flagOf(slug) {
+  const l = BY_SLUG[slug];
+  if (!l) return '<span class="fl-e">⚽</span>';
+  return l.cc ? '<img class="fl" src="https://flagcdn.com/w40/' + l.cc + '.png" alt="" width="20" height="14" loading="lazy">' : '<span class="fl-e">' + l.flag + '</span>';
+}

@@ -44,7 +44,10 @@
     <div class="main">
       <section class="panel" id="p-matches">
         <div class="filters">
-          <label class="sel"><span class="sr" data-i18n="League">League</span><select id="league"></select></label>
+          <div class="ddl" id="leagueDd">
+            <button type="button" class="ddl-btn" id="leagueBtn" aria-haspopup="listbox" aria-expanded="false"></button>
+            <div class="ddl-menu" id="leagueMenu" role="listbox" hidden></div>
+          </div>
           <div class="chips" id="days" role="group" aria-label="Day">
             <button class="chip" data-day="all" aria-pressed="true" data-i18n="All days">All days</button>
             <button class="chip" data-day="today" aria-pressed="false" data-i18n="Today">Today</button>

@@ -5,7 +5,7 @@ import { getFirestore, connectFirestoreEmulator, collection, doc, query, where, 
   writeBatch, serverTimestamp, Timestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig, DAILY_COINS, DAY_OFFSET_HOURS } from './config.js';
 import { markets, halfMarkets, liveMarkets, comboOdds, matchOutcome, liveOutcome, MAX_LEGS } from './markets.js';
-import { LEAGUES, GROUPS, BY_SLUG } from './leagues.js';
+import { LEAGUES, GROUPS, BY_SLUG, flagOf } from './leagues.js';
 import { t, mk, short, label, sass, getLang, setLang } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
@@ -411,19 +411,29 @@ function renderLeagues() {
   const now = Date.now(), count = {};
   S.matches.forEach((m) => { if (isOpen(m, now)) count[m.sk] = (count[m.sk] || 0) + 1; });
   const total = Object.values(count).reduce((a, b) => a + b, 0);
-  let h = '<option value="all">⚽ ' + t('All leagues') + ' (' + total + ')</option>';
-  if (favs().length) h += '<option value="fav">⭐ ' + t('Your teams') + '</option>';
-  GROUPS.forEach((g) => {
-    const ls = LEAGUES.filter((l) => l.group === g && count[l.slug]);
-    if (ls.length) h += '<optgroup label="' + esc(t(g)) + '">' + ls.map((l) => '<option value="' + l.slug + '">' + l.flag + ' ' + esc(t(l.name)) + ' (' + count[l.slug] + ')</option>').join('') + '</optgroup>';
-  });
-  const other = Object.keys(count).filter((s) => !BY_SLUG[s]);
-  if (other.length) h += '<optgroup label="' + t('Other') + '">' + other.map((s) => '<option value="' + esc(s) + '">' + esc(s) + ' (' + count[s] + ')</option>').join('') + '</optgroup>';
   if (S.league === 'fav' && !favs().length) S.league = 'all';
   if (S.league !== 'all' && S.league !== 'fav' && !count[S.league]) S.league = 'all';
-  const sel = $('league');
-  if (last.league !== h) { last.league = h; sel.innerHTML = h; }
-  sel.value = S.league;
+  const opt = (val, icon, name, n) => '<button type="button" role="option" data-lg="' + esc(val) + '" aria-selected="' + (S.league === val) + '">'
+    + icon + '<span class="ddl-n">' + esc(name) + '</span>' + (n != null ? '<span class="ddl-c">' + n + '</span>' : '') + '</button>';
+  let h = opt('all', '<span class="fl-e">⚽</span>', t('All leagues'), total);
+  if (favs().length) h += opt('fav', '<span class="fl-e">⭐</span>', t('Your teams'));
+  GROUPS.forEach((g) => {
+    const ls = LEAGUES.filter((l) => l.group === g && count[l.slug]);
+    if (ls.length) h += '<div class="ddl-g">' + esc(t(g)) + '</div>' + ls.map((l) => opt(l.slug, flagOf(l.slug), t(l.name), count[l.slug])).join('');
+  });
+  const other = Object.keys(count).filter((x) => !BY_SLUG[x]);
+  if (other.length) h += '<div class="ddl-g">' + t('Other') + '</div>' + other.map((x) => opt(x, flagOf(x), x, count[x])).join('');
+  paint('leagueMenu', h);
+  const L = BY_SLUG[S.league];
+  paint('leagueBtn', S.league === 'all' ? '<span class="fl-e">⚽</span><span class="ddl-n">' + t('All leagues') + ' (' + total + ')</span>'
+    : S.league === 'fav' ? '<span class="fl-e">⭐</span><span class="ddl-n">' + t('Your teams') + '</span>'
+    : flagOf(S.league) + '<span class="ddl-n">' + esc(L ? t(L.name) : S.league) + ' (' + (count[S.league] || 0) + ')</span>');
+}
+
+function openLeagues(on) {
+  $('leagueMenu').hidden = !on;
+  $('leagueBtn').setAttribute('aria-expanded', on);
+  if (on) { const cur = $('leagueMenu').querySelector('[aria-selected=true]'); if (cur) { cur.scrollIntoView({ block: 'nearest' }); cur.focus(); } }
 }
 
 function inDay(m) {
@@ -511,8 +521,7 @@ function fixtureRow(m, now, mine, friends) {
 }
 
 function leagueHead(sk, lg) {
-  const L = BY_SLUG[sk];
-  return '<div class="lg-head">' + (L ? L.flag + ' ' : '') + esc(t(lg)) + '</div>';
+  return '<div class="lg-head">' + flagOf(sk) + esc(t(lg)) + '</div>';
 }
 
 function renderMatches() {
@@ -560,7 +569,7 @@ function renderMatches() {
 }
 
 function liveCard(lv) {
-  const L = BY_SLUG[lv.sk], sel = S.slip.find((l) => l.live && l.m === lv.id);
+  const sel = S.slip.find((l) => l.live && l.m === lv.id);
   const fresh = Date.now() - ms(lv.at) < 55e3, closed = lv.min >= 85;
   let h = '<article class="lv' + (lv.susp || !fresh ? ' susp' : '') + '"><div class="lv-head"><span>' + (L ? L.flag + ' ' : '') + esc(t(lv.lg)) + '</span>'
     + '<span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span></div>'
@@ -732,7 +741,24 @@ document.querySelector('.lang').addEventListener('click', (e) => { const b = e.t
 $('wallet').addEventListener('submit', (e) => { e.preventDefault(); const i = $('nameIn'); if (i) join(i.value); });
 $('wallet').addEventListener('click', (e) => { if (e.target.closest('#claimBtn')) claim(); });
 $('acctBtn').addEventListener('click', openAccount);
-$('league').addEventListener('change', (e) => { S.league = e.target.value; S.shown = PAGE; renderMatches(); });
+$('leagueBtn').addEventListener('click', () => openLeagues($('leagueMenu').hidden));
+$('leagueMenu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lg]');
+  if (!b) return;
+  S.league = b.dataset.lg; S.shown = PAGE;
+  openLeagues(false); renderLeagues(); renderMatches();
+  $('leagueBtn').focus();
+});
+document.addEventListener('click', (e) => { if (!$('leagueMenu').hidden && !e.target.closest('#leagueDd')) openLeagues(false); });
+$('leagueDd').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { openLeagues(false); $('leagueBtn').focus(); return; }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  if ($('leagueMenu').hidden) { openLeagues(true); return; }
+  const items = [...$('leagueMenu').querySelectorAll('[data-lg]')], i = items.indexOf(document.activeElement);
+  const next = items[Math.max(0, Math.min(items.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+  if (next) next.focus();
+});
 $('days').addEventListener('click', (e) => {
   const b = e.target.closest('[data-day]');
   if (!b) return;

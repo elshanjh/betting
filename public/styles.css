@@ -81,6 +81,22 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
 .sel::after{content:"";position:absolute;right:14px;top:50%;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none}
 .filters input[type=search]{flex:1 1 170px;background:var(--card)}
 
+/* league dropdown (custom, so it can show flag images) */
+.ddl{position:relative;flex:1 1 230px;min-width:0}
+.ddl-btn{width:100%;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:9px 36px 9px 12px;font-weight:700;text-align:left;position:relative}
+.ddl-btn::after{content:"";position:absolute;right:14px;top:50%;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg)}
+.ddl-btn[aria-expanded=true]::after{transform:translateY(-30%) rotate(225deg)}
+.ddl-menu{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:min(60vh,460px);overflow:auto;padding:4px;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+.ddl-menu [role=option]{width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;border-radius:6px;padding:8px 10px;text-align:left;font-weight:600}
+.ddl-menu [role=option]:hover,.ddl-menu [role=option]:focus-visible{background:var(--ob-h);outline:none}
+.ddl-menu [role=option][aria-selected=true]{background:var(--ob);color:var(--accent)}
+.ddl-g{padding:10px 10px 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ddl-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ddl-c{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.fl{width:20px;height:14px;object-fit:cover;border-radius:2px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.fl-e{width:20px;text-align:center;flex:none;line-height:1}
+.lg-head,.lv-lg{display:flex;align-items:center;gap:8px}
+
 /* match blocks and rows */
 .list{display:flex;flex-direction:column;gap:12px}
 #matches{display:flex;flex-direction:column;gap:12px}
@@ -274,5 +290,5 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
   .pl-head,.pl-row{grid-template-columns:minmax(0,1fr) 64px 64px}
 }
 /* The display font has no capital Ə, so Azerbaijani headings keep their case. */
-:lang(az) h1,:lang(az) h2,:lang(az) h3,:lang(az) h4,:lang(az) .block-h,:lang(az) .tabs button,:lang(az) .stat small,:lang(az) th,:lang(az) .pl-head,:lang(az) .logo-name{text-transform:none}
+:lang(az) h1,:lang(az) h2,:lang(az) h3,:lang(az) h4,:lang(az) .block-h,:lang(az) .tabs button,:lang(az) .stat small,:lang(az) th,:lang(az) .pl-head,:lang(az) .ddl-g,:lang(az) .logo-name{text-transform:none}
 @media (prefers-reduced-motion:reduce){.tabs .dot{animation:none}.slip-wrap,#toast{transition:none}}
