@@ -146,6 +146,19 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
 .slipbar{position:fixed;left:16px;right:16px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:5;border:0;border-radius:8px;background:var(--pitch);color:var(--pitch-ink);padding:13px 16px;font-weight:600;font-size:16px;display:flex;justify-content:space-between;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:6}
 
+/* sign in */
+.auth{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:12px;max-width:440px;width:100%;margin-inline:auto}
+.auth p{margin:0;color:var(--muted)}
+.auth .gbtn{padding:12px;font-size:16px}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px}
+.or::before,.or::after{content:"";flex:1;border-top:1px solid var(--line)}
+#authForm{display:flex;flex-direction:column;gap:10px}
+#authForm label{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:14px}
+#authForm label small{font-weight:400;color:var(--muted)}
+#authForm input{font:inherit;font-weight:400;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+#authForm .btn{padding:12px;font-size:16px}
+.auth-links{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+
 /* my bets */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 12px}

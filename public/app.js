@@ -1,5 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
-import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, connectAuthEmulator }
+import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, connectAuthEmulator,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail }
   from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, connectFirestoreEmulator, collection, doc, query, where, orderBy, limit, onSnapshot, setDoc, updateDoc,
   writeBatch, serverTimestamp, Timestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
@@ -15,7 +16,7 @@ const S = {
   myBets: [], feed: [], openBets: [], busy: false,
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null,
   slip: load('fs_slip', []), stake: 25, sheet: false,
-  myLimit: 50, myMore: false, mineFilter: 'all',
+  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login',
 };
 let mySub = null;
 const last = {};
@@ -63,6 +64,55 @@ function signIn() {
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') signInWithRedirect(auth, provider);
     else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') toast('Sign-in failed. Try again.');
   });
+}
+
+const AUTH_ERR = {
+  'auth/invalid-credential': 'Wrong email or password.',
+  'auth/wrong-password': 'Wrong email or password.',
+  'auth/user-not-found': 'No account with that email. Sign up instead?',
+  'auth/email-already-in-use': 'That email already has an account. Log in instead.',
+  'auth/weak-password': 'Password needs at least 6 characters.',
+  'auth/invalid-email': 'That email doesn\'t look right.',
+  'auth/missing-password': 'Type a password.',
+  'auth/too-many-requests': 'Too many tries. Wait a minute and try again.',
+  'auth/network-request-failed': 'No connection. Try again.',
+  'auth/operation-not-allowed': 'Email sign-in isn\'t switched on in Firebase yet.',
+};
+
+async function emailAuth(email, pass) {
+  email = email.trim();
+  if (!email) { toast('Type your email.'); return; }
+  try {
+    if (S.authMode === 'reset') {
+      await sendPasswordResetEmail(auth, email);
+      toast('If that email has an account, a reset link is on its way. Check spam too.');
+      S.authMode = 'login'; renderMatches();
+    } else if (S.authMode === 'signup') {
+      await createUserWithEmailAndPassword(auth, email, pass);
+    } else {
+      await signInWithEmailAndPassword(auth, email, pass);
+    }
+  } catch (e) {
+    if (S.authMode === 'reset' && e.code === 'auth/user-not-found') { toast('If that email has an account, a reset link is on its way.'); return; }
+    toast(AUTH_ERR[e.code] || 'That didn\'t work. Try again.');
+  }
+}
+
+function authCard() {
+  const m = S.authMode;
+  const title = m === 'signup' ? 'Create an account' : m === 'reset' ? 'Reset your password' : 'Log in';
+  return '<div class="auth"><h2>Join the game</h2><p>Sign in to get 100 free coins a day and bet on real matches with your friends.</p>'
+    + '<button class="btn gbtn" id="signInBtn">Continue with Google</button>'
+    + '<div class="or"><span>or with email</span></div>'
+    + '<form id="authForm" novalidate><h3>' + title + '</h3>'
+    + '<label>Email<input type="email" id="authEmail" autocomplete="email" inputmode="email" required></label>'
+    + (m === 'reset' ? '' : '<label>Password<input type="password" id="authPass" autocomplete="' + (m === 'signup' ? 'new-password' : 'current-password') + '" minlength="6" required>'
+      + (m === 'signup' ? '<small>At least 6 characters.</small>' : '') + '</label>')
+    + '<button class="btn" type="submit">' + (m === 'signup' ? 'Sign up' : m === 'reset' ? 'Send reset link' : 'Log in') + '</button>'
+    + '<div class="auth-links">'
+    + (m === 'login' ? '<button type="button" class="linkish" data-mode="signup">No account? Sign up</button><button type="button" class="linkish" data-mode="reset">Forgot password?</button>'
+      : '<button type="button" class="linkish" data-mode="login">Have an account? Log in</button>')
+    + '</div></form></div>';
 }
 
 function failed(e, msg) {
@@ -232,10 +282,10 @@ function renderWallet() {
   let h;
   if (!configured) h = '<small>Add your Firebase config to public/config.js.</small>';
   else if (!S.authed) h = '<small>Loading…</small>';
-  else if (!S.user) h = '<div><small>Sign in to get your coins</small></div><button class="btn" id="signInBtn">Sign in with Google</button>';
+  else if (!S.user) h = '<small>Not signed in yet</small>';
   else if (!S.meLoaded) h = '<small>Loading your coins…</small>';
   else if (!me) {
-    const first = esc(((S.user.displayName || '').split(' ')[0] || '').slice(0, 20));
+    const first = esc(((S.user.displayName || '').split(' ')[0] || (S.user.email || '').split('@')[0].replace(/[^\p{L}\p{N}._ -]/gu, '') || '').slice(0, 20));
     h = '<form class="join" id="joinForm"><label for="nameIn"><small>Your name on the table</small></label><input type="text" id="nameIn" maxlength="20" autocomplete="nickname" value="' + first + '" placeholder="e.g. Rauf"><button class="btn" type="submit">Join the game</button></form>';
   } else {
     const claimed = (me.lastClaimDay || 0) >= claimDay();
@@ -314,6 +364,7 @@ function fixtureCard(m, now, mine, friends) {
 }
 
 function renderMatches() {
+  document.querySelector('.filters').hidden = !S.user;
   const now = Date.now(), q = S.q.trim().toLowerCase();
   const list = S.matches.filter((m) => (S.league === 'all' || m.sk === S.league) && (!q || (m.home + ' ' + m.away).toLowerCase().includes(q)));
   const myOpen = {};
@@ -321,7 +372,7 @@ function renderMatches() {
   const fr = crowd();
   let h = '';
   if (!configured) h = '<div class="empty">Waiting for the Firebase config.</div>';
-  else if (!S.user) h = '<div class="empty">Sign in to see this week\'s matches.</div>';
+  else if (!S.user) h = authCard();
   else if (!S.matchesLoaded) h = '<div class="empty">Loading this week\'s matches…</div>';
   else {
     const up = list.filter((m) => isOpen(m, now) && inDay(m));
@@ -494,9 +545,21 @@ $('days').addEventListener('click', (e) => {
   renderMatches();
 });
 $('search').addEventListener('input', (e) => { S.q = e.target.value; S.shown = PAGE; renderMatches(); });
+$('matches').addEventListener('submit', (e) => {
+  if (e.target.id !== 'authForm') return;
+  e.preventDefault();
+  emailAuth($('authEmail').value, $('authPass') ? $('authPass').value : '');
+});
 $('matches').addEventListener('click', (e) => {
   const t = e.target.closest('button');
   if (!t) return;
+  if (t.id === 'signInBtn') { signIn(); return; }
+  if (t.dataset.mode) {
+    const email = $('authEmail') ? $('authEmail').value : '';
+    S.authMode = t.dataset.mode; renderMatches();
+    if ($('authEmail')) { $('authEmail').value = email; $('authEmail').focus(); }
+    return;
+  }
   if (t.dataset.more) { S.exp = S.exp === t.dataset.more ? null : t.dataset.more; renderMatches(); }
   else if (t.dataset.showmore) { S.shown += PAGE; renderMatches(); }
   else if (t.dataset.showdone) { S.showDone = !S.showDone; renderMatches(); }
@@ -539,7 +602,7 @@ else {
     subs.splice(0).forEach((u) => u());
     if (mySub) { mySub(); mySub = null; }
     S.myLimit = 50;
-    Object.assign(S, { user, authed: true, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [] });
+    Object.assign(S, { user, authed: true, authMode: 'login', me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [] });
     if (user) listen();
     renderAll();
   });

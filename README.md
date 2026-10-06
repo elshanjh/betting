@@ -33,7 +33,9 @@ test/              rule tests + sync tests (npm test)
 
 1. Go to <https://console.firebase.google.com>, **Create a project**. You can
    turn Google Analytics off.
-2. **Build > Authentication > Get started > Sign-in method > Google > Enable.**
+2. **Build > Authentication > Get started > Sign-in method**: enable **Google**,
+   then **Add new provider > Email/Password** and enable it too, so friends
+   without a Google account can sign up with any email.
 3. **Build > Firestore Database > Create database.** Pick a location near you
    (for example `eur3` for Europe) and start in **production mode**.
 
