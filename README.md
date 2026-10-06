@@ -58,7 +58,10 @@ test/              rule tests + sync tests (npm test)
 
 If Deploy fails with a permission error, open
 <https://console.cloud.google.com/iam-admin/iam>, select your project, edit
-the `firebase-adminsdk-…` service account and add the role **Firebase Admin**.
+the `firebase-adminsdk-…` service account (or **Grant access** and paste its
+email) and add the roles **Service Usage Consumer**, **Cloud Datastore Index
+Admin**, **Firebase Rules Admin** and **Firebase Hosting Admin**. The Deploy
+log's "Check permissions" step names the account and what is missing.
 
 ### 4. Invite your friends
 

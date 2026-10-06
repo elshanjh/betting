@@ -28,5 +28,5 @@ else if (!missing.length) console.log('All deploy permissions present.');
 else {
   console.log('Missing: ' + missing.join(', '));
   console.log('Fix: https://console.cloud.google.com/iam-admin/iam?project=' + sa.project_id
-    + ' > Grant access > principal ' + sa.client_email + ' > roles "Firebase Admin" and "Service Usage Consumer".');
+    + ' > Grant access > principal ' + sa.client_email + ' > roles "Service Usage Consumer", "Cloud Datastore Index Admin", "Firebase Rules Admin", "Firebase Hosting Admin".');
 }
