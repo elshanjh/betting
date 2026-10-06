@@ -44,13 +44,16 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--pitch);outline-
 input[type=text],input[type=number]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:0}
 .banner{background:var(--chip);border-left:4px solid var(--coin);padding:10px 14px;border-radius:4px}
 
-.tabs{display:none;gap:6px}
+.tabs{display:flex;gap:6px;position:sticky;top:0;z-index:2;background:var(--bg);padding-block:6px}
+.badge{display:inline-block;min-width:20px;padding:0 6px;border-radius:999px;background:var(--coin);color:var(--coin-ink);font-size:13px;line-height:20px;letter-spacing:0}
 .tabs button{flex:1;border:1px solid var(--line);background:var(--card);border-radius:4px;padding:9px 6px;font-family:var(--display);font-weight:600;font-size:17px;text-transform:uppercase;letter-spacing:.04em}
 .tabs button[aria-selected=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 
 .app{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:20px;align-items:start}
-.side{display:flex;flex-direction:column;gap:20px;min-width:0}
-.panel{min-width:0;display:flex;flex-direction:column;gap:12px}
+.main{min-width:0}
+.side{display:flex;flex-direction:column;gap:20px;min-width:0;position:sticky;top:62px}
+.panel{min-width:0;display:none;flex-direction:column;gap:12px}
+.app[data-tab=matches] #p-matches,.app[data-tab=mine] #p-mine,.app[data-tab=board] #p-board{display:flex}
 .panel-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:4px 11px;font-size:13px;font-weight:500}
@@ -143,6 +146,23 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
 .slipbar{position:fixed;left:16px;right:16px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:5;border:0;border-radius:8px;background:var(--pitch);color:var(--pitch-ink);padding:13px 16px;font-weight:600;font-size:16px;display:flex;justify-content:space-between;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:6}
 
+/* my bets */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.stat small{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.stat b{font-family:var(--display);font-size:26px;font-weight:700}
+.bets{display:flex;flex-direction:column;gap:8px}
+.bet{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:6px;padding:10px 14px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 12px;align-items:start}
+.bet.won{border-left-color:var(--win)} .bet.lost{border-left-color:var(--lose)} .bet.open{border-left-color:var(--coin)}
+.bet .ico{font-size:24px;line-height:1.2;grid-row:1/span 2}
+.bet .t{font-weight:600;overflow-wrap:anywhere}
+.bet .s{grid-column:2;color:var(--muted);font-size:13px}
+.bet .r{grid-column:3;grid-row:1/span 2;text-align:right;font-family:var(--display);font-weight:700;font-size:22px;line-height:1.1}
+.bet .r small{display:block;font-family:var(--body);font-weight:500;font-size:12px;color:var(--muted)}
+.bet .legs-mini{grid-column:2/-1}
+.legs-mini .lg{display:flex;gap:6px;align-items:baseline}
+.legs-mini .lg em{font-style:normal;margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink)}
+
 /* multi-bets in lists */
 .legs-mini{grid-column:1/-1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);margin-top:4px}
 .legs-mini span.won{color:var(--win)} .legs-mini span.lost{color:var(--lose);text-decoration:line-through}
@@ -163,11 +183,8 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .broke{font-size:12px}
 
 @media (max-width:899px){
-  .tabs{display:flex;position:sticky;top:0;z-index:2;background:var(--bg);padding-block:6px}
   .app{grid-template-columns:minmax(0,1fr)}
   .side{display:contents}
-  .panel{display:none}
-  .app[data-tab=matches] #p-matches,.app[data-tab=mine] #p-mine,.app[data-tab=board] #p-board{display:flex}
   .fx{grid-template-columns:minmax(0,1fr)}
   .odds{grid-template-columns:repeat(3,minmax(0,1fr))}
   h1{font-size:28px}
@@ -178,5 +195,6 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 }
 @media (min-width:900px){
   .slipbar,.scrim{display:none!important}
+  .slip-wrap{max-height:calc(100vh - 80px);overflow:auto}
 }
 @media (prefers-reduced-motion:reduce){.slip-wrap{transition:none}}

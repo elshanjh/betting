@@ -30,28 +30,27 @@
 
   <nav class="tabs" id="tabs" aria-label="Sections">
     <button data-tab="matches" aria-selected="true">Fixtures</button>
-    <button data-tab="mine" aria-selected="false">Your bets</button>
+    <button data-tab="mine" aria-selected="false">My bets <span class="badge" id="openCount" hidden></span></button>
     <button data-tab="board" aria-selected="false">Table</button>
   </nav>
 
   <div class="app" id="app" data-tab="matches">
-    <section class="panel" id="p-matches">
-      <div class="filters">
-        <label class="sel"><span class="sr">League</span><select id="league"></select></label>
-        <div class="chips" id="days" role="group" aria-label="Day">
-          <button class="chip" data-day="all" aria-pressed="true">All days</button>
-          <button class="chip" data-day="today" aria-pressed="false">Today</button>
-          <button class="chip" data-day="tomorrow" aria-pressed="false">Tomorrow</button>
-          <button class="chip" data-day="weekend" aria-pressed="false">Weekend</button>
+    <div class="main">
+      <section class="panel" id="p-matches">
+        <div class="filters">
+          <label class="sel"><span class="sr">League</span><select id="league"></select></label>
+          <div class="chips" id="days" role="group" aria-label="Day">
+            <button class="chip" data-day="all" aria-pressed="true">All days</button>
+            <button class="chip" data-day="today" aria-pressed="false">Today</button>
+            <button class="chip" data-day="tomorrow" aria-pressed="false">Tomorrow</button>
+            <button class="chip" data-day="weekend" aria-pressed="false">Weekend</button>
+          </div>
+          <input type="search" id="search" placeholder="Search a team" autocomplete="off" aria-label="Search a team">
         </div>
-        <input type="search" id="search" placeholder="Search a team" autocomplete="off" aria-label="Search a team">
-      </div>
-      <div class="list" id="matches"><div class="empty">Loading this week's matches…</div></div>
-    </section>
-    <div class="side">
-      <section class="slip-wrap" id="slip" aria-label="Bet slip"></section>
+        <div class="list" id="matches"><div class="empty">Loading this week's matches…</div></div>
+      </section>
       <section class="panel" id="p-mine">
-        <h2>Your bets</h2>
+        <h2>My bets</h2>
         <div id="mine"><div class="empty">Tap a price next to a match to start a bet slip.</div></div>
       </section>
       <section class="panel" id="p-board">
@@ -61,6 +60,9 @@
         <div id="feed"><div class="empty">Nobody has placed a bet yet.</div></div>
       </section>
     </div>
+    <aside class="side">
+      <section class="slip-wrap" id="slip" aria-label="Bet slip"></section>
+    </aside>
   </div>
 
   <footer>1 = home win, X = draw, 2 = away win. Tap prices from different matches to build a multi-bet (up to 6 picks): every pick has to win, and the odds multiply. Club odds are DraftKings prices via ESPN; national-team odds without a bookmaker price come from World Football Elo ratings. Bets settle on the final score. Coins have no value and cannot be bought, sold or cashed out. <button class="linkish" id="signOut" hidden>Sign out</button></footer>

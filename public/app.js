@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signI
 import { getFirestore, connectFirestoreEmulator, collection, doc, query, where, orderBy, limit, onSnapshot, setDoc, updateDoc,
   writeBatch, serverTimestamp, Timestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig, DAILY_COINS, DAY_OFFSET_HOURS } from './config.js';
-import { markets, selLabel, comboOdds, MAX_LEGS } from './markets.js';
+import { markets, selLabel, comboOdds, outcome, MAX_LEGS } from './markets.js';
 import { LEAGUES, GROUPS, BY_SLUG } from './leagues.js';
 import { sass } from './sass.js';
 
@@ -15,7 +15,9 @@ const S = {
   myBets: [], feed: [], openBets: [], busy: false,
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null,
   slip: load('fs_slip', []), stake: 25, sheet: false,
+  myLimit: 50, myMore: false, mineFilter: 'all',
 };
+let mySub = null;
 const last = {};
 const subs = [];
 
@@ -199,11 +201,7 @@ function listen() {
     renderAll();
   }, (e) => { console.error(e); S.meLoaded = true; renderAll(); }));
 
-  subs.push(onSnapshot(query(collection(db, 'bets'), where('uid', '==', uid), orderBy('placed', 'desc'), limit(60)), (snap) => {
-    S.myBets = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-    renderMine();
-    if (!snap.metadata.fromCache) checkResults();
-  }, (e) => console.error(e)));
+  listenMine();
 
   subs.push(onSnapshot(query(collection(db, 'bets'), orderBy('placed', 'desc'), limit(15)), (snap) => {
     S.feed = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
@@ -214,6 +212,18 @@ function listen() {
     S.openBets = snap.docs.map((d) => d.data());
     renderBoard(); renderMatches();
   }, (e) => console.error(e)));
+}
+
+// Own bets, newest first; "Load older bets" raises the limit.
+function listenMine() {
+  if (mySub) mySub();
+  mySub = onSnapshot(query(collection(db, 'bets'), where('uid', '==', S.user.uid), orderBy('placed', 'desc'), limit(S.myLimit + 1)), (snap) => {
+    const all = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+    S.myMore = all.length > S.myLimit;
+    S.myBets = all.slice(0, S.myLimit);
+    renderMine(); renderMatches();
+    if (!snap.metadata.fromCache) checkResults();
+  }, (e) => console.error(e));
 }
 
 /* ---------- rendering ---------- */
@@ -370,29 +380,71 @@ function renderSlipBar() {
   if (n) bar.innerHTML = '<span>🧾 Bet slip · ' + n + (n === 1 ? ' pick' : ' picks') + '</span><span class="num">@ ' + (st.good.length ? fmtOdds(st.odds) : '–') + ' ›</span>';
 }
 
-function betRow(b) {
-  const legs = legsOf(b), res = b.res || [];
-  const right = b.status === 'open' ? '<span class="num">' + Math.round(b.stake * b.odds) + '</span>'
-    : b.status === 'won' ? '<span class="num won-n">+' + b.payout + '</span>'
-    : b.status === 'lost' ? '<span class="num lost-n">−' + b.stake + '</span>' : '<span class="num">' + b.stake + '</span>';
+const ICON = { open: '⏳', won: '✅', lost: '❌', void: '↩️' };
+const WORD = { open: 'Waiting', won: 'Won', lost: 'Lost', void: 'Refunded' };
+function fmtWhen(t) {
+  const d = new Date(ms(t) || Date.now());
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ', ' + fmtTime(d);
+}
+
+// Per-pick state: from settlement when it ran, else from the live match.
+function legState(b, l, i, mm) {
+  const m = mm[l.m];
+  let st = (b.res && b.res[i]) || 'open';
+  if (st === 'open' && m && m.status === 'final') st = outcome(l.k, m.sh, m.sa);
+  if (st === 'open' && m && m.status === 'void') st = 'void';
+  const live = m && m.status === 'scheduled' && ms(m.ko) <= Date.now();
+  const score = m && m.status === 'final' ? m.sh + '-' + m.sa : live ? 'playing' : m && st === 'open' ? fmtWhen(m.ko) : '';
+  return { st, score };
+}
+
+function betCard(b, mm) {
+  const legs = legsOf(b), st = b.status;
   const title = legs.length > 1 ? legs.length + '-pick multi' : esc(legs[0].label);
-  return '<div class="row"><div class="t">' + title + ' <span class="num">@ ' + fmtOdds(b.odds) + '</span></div>'
-    + '<div class="s">' + (legs.length > 1 ? '' : esc(legs[0].fx) + (b.score ? ' · ' + esc(b.score) : '') + ' · ') + 'staked ' + b.stake + ' <span class="pill ' + b.status + '">' + (b.status === 'void' ? 'refunded' : b.status) + '</span></div>'
-    + '<div class="r">' + right + '</div>'
-    + (legs.length > 1 ? '<div class="legs-mini">' + legs.map((l, i) => '<span class="' + (res[i] || '') + '">' + (res[i] === 'won' ? '✓ ' : res[i] === 'lost' ? '✗ ' : res[i] === 'void' ? '↺ ' : '• ') + esc(l.label) + ' @ ' + fmtOdds(l.o) + ' · ' + esc(l.fx) + '</span>').join('') + '</div>' : '')
-    + '</div>';
+  const right = st === 'open' ? Math.round(b.stake * b.odds) + '<small>to win</small>'
+    : st === 'won' ? '<span class="won-n">+' + b.payout + '</span><small>paid</small>'
+    : st === 'lost' ? '<span class="lost-n">−' + b.stake + '</span><small>lost</small>'
+    : b.stake + '<small>refunded</small>';
+  let h = '<article class="bet ' + st + '"><div class="ico" title="' + WORD[st] + '" aria-label="' + WORD[st] + '">' + ICON[st] + '</div>'
+    + '<div class="t">' + title + ' <span class="num">@ ' + fmtOdds(b.odds) + '</span></div>'
+    + '<div class="r num">' + right + '</div>'
+    + '<div class="s">' + WORD[st] + ' · staked ' + b.stake + ' · ' + esc(fmtWhen(b.placed)) + '</div>';
+  h += '<div class="legs-mini">' + legs.map((l, i) => {
+    const x = legState(b, l, i, mm);
+    return '<span class="lg ' + x.st + '">' + ICON[x.st] + ' <span>' + (legs.length > 1 ? esc(l.label) + ' @ ' + fmtOdds(l.o) + ' · ' : '') + esc(l.fx) + '</span><em>' + esc(x.score || b.score || '') + '</em></span>';
+  }).join('') + '</div>';
+  return h + '</article>';
 }
 
 function renderMine() {
-  const bets = S.myBets;
+  const bets = S.myBets, mm = matchMap();
+  const open = bets.filter((b) => b.status === 'open').length;
+  const badge = $('openCount');
+  badge.hidden = !open; badge.textContent = open;
   let h;
   if (!S.me) h = '<div class="empty">Join the game, claim your coins, then tap a price next to a match.</div>';
-  else if (!bets.length) h = '<div class="empty">No bets yet. Tap prices to fill your bet slip.</div>';
+  else if (!bets.length) h = '<div class="empty">No bets yet. Tap prices on the Fixtures tab to fill your bet slip.</div>';
   else {
-    const open = bets.filter((b) => b.status === 'open'), old = bets.filter((b) => b.status !== 'open');
-    h = '';
-    if (open.length) h += '<h3>Open · pays if it wins</h3><div class="slip">' + open.map(betRow).join('') + '</div>';
-    if (old.length) h += '<h3' + (open.length ? ' style="margin-top:12px"' : '') + '>Settled</h3><div class="slip">' + old.map(betRow).join('') + '</div>';
+    const n = { all: bets.length, open: 0, won: 0, lost: 0, void: 0 };
+    let staked = 0, back = 0, best = 0;
+    bets.forEach((b) => {
+      n[b.status]++;
+      if (b.status !== 'open') { staked += b.stake; back += b.payout || 0; }
+      if (b.status === 'won') best = Math.max(best, b.payout - b.stake);
+    });
+    const w = S.me.won || 0, l = S.me.lost || 0, net = back - staked;
+    h = '<div class="stats">'
+      + '<div class="stat"><small>Record</small><b class="num">' + w + '–' + l + '</b></div>'
+      + '<div class="stat"><small>Win rate</small><b class="num">' + (w + l ? Math.round((100 * w) / (w + l)) + '%' : '–') + '</b></div>'
+      + '<div class="stat"><small>Profit' + (S.myMore ? ' (shown)' : '') + '</small><b class="num ' + (net > 0 ? 'won-n' : net < 0 ? 'lost-n' : '') + '">' + (net > 0 ? '+' : '') + net + '</b></div>'
+      + '<div class="stat"><small>Biggest win</small><b class="num">' + (best ? '+' + best : '–') + '</b></div>'
+      + '</div>';
+    h += '<div class="chips" id="mineFilter">' + ['all', 'open', 'won', 'lost', 'void'].filter((k) => k === 'all' || n[k]).map((k) =>
+      '<button class="chip" data-mf="' + k + '" aria-pressed="' + (S.mineFilter === k) + '">' + (k === 'all' ? 'All' : ICON[k] + ' ' + WORD[k]) + ' (' + n[k] + ')</button>').join('') + '</div>';
+    if (S.mineFilter !== 'all' && !n[S.mineFilter]) S.mineFilter = 'all';
+    const list = bets.filter((b) => S.mineFilter === 'all' || b.status === S.mineFilter);
+    h += '<div class="bets">' + list.map((b) => betCard(b, mm)).join('') + '</div>';
+    if (S.myMore) h += '<button class="more-btn" data-older="1">Load older bets</button>';
   }
   paint('mine', h);
 }
@@ -424,6 +476,8 @@ $('tabs').addEventListener('click', (e) => {
   if (!b) return;
   $('app').dataset.tab = b.dataset.tab;
   Array.from($('tabs').children).forEach((x) => x.setAttribute('aria-selected', x === b));
+  const top = $('tabs').getBoundingClientRect().top + window.scrollY;
+  if (window.scrollY > top) window.scrollTo({ top });
 });
 $('wallet').addEventListener('submit', (e) => { e.preventDefault(); const i = $('nameIn'); if (i) join(i.value); });
 $('wallet').addEventListener('click', (e) => {
@@ -451,6 +505,12 @@ $('matches').addEventListener('click', (e) => {
     toggleLeg(t.dataset.mid, t.dataset.k);
   }
 });
+$('mine').addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.dataset.mf) { S.mineFilter = t.dataset.mf; renderMine(); }
+  else if (t.dataset.older) { S.myLimit += 50; listenMine(); }
+});
 $('slip').addEventListener('click', (e) => {
   const t = e.target.closest('button');
   if (!t) return;
@@ -477,6 +537,8 @@ if (!configured) { S.authed = true; renderAll(); }
 else {
   onAuthStateChanged(auth, (user) => {
     subs.splice(0).forEach((u) => u());
+    if (mySub) { mySub(); mySub = null; }
+    S.myLimit = 50;
     Object.assign(S, { user, authed: true, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [] });
     if (user) listen();
     renderAll();
