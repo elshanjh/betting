@@ -4,29 +4,39 @@ import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signI
 import { getFirestore, connectFirestoreEmulator, collection, doc, query, where, orderBy, limit, onSnapshot, setDoc, updateDoc,
   writeBatch, serverTimestamp, Timestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig, DAILY_COINS, DAY_OFFSET_HOURS } from './config.js';
-import { markets, selLabel } from './markets.js';
+import { markets, selLabel, comboOdds, MAX_LEGS } from './markets.js';
+import { LEAGUES, GROUPS, BY_SLUG } from './leagues.js';
+import { sass } from './sass.js';
 
 const $ = (id) => document.getElementById(id);
+const PAGE = 10;
 const S = {
   user: null, authed: false, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false,
-  myBets: [], feed: [], openBets: [], league: 'all', open: null, exp: null, busy: false,
+  myBets: [], feed: [], openBets: [], busy: false,
+  league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null,
+  slip: load('fs_slip', []), stake: 25, sheet: false,
 };
 const last = {};
 const subs = [];
 
+function load(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } }
 function paint(id, html) { if (last[id] !== html) { last[id] = html; $(id).innerHTML = html; } }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function dayKey(d) { return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); }
 function fmtDay(d) { return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }); }
 function fmtTime(d) { return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); }
 function ms(t) { return t && t.toMillis ? t.toMillis() : 0; }
+const fmtOdds = (o) => (o >= 100 ? Math.round(o) : Number(o).toFixed(2));
 // Must match today() in firestore.rules.
 const DAY_MS = 86400000, OFFSET_MS = DAY_OFFSET_HOURS * 3600000;
 function claimDay(now = Date.now()) { return Math.floor((now + OFFSET_MS) / DAY_MS); }
 function nextClaimAt() { return (claimDay() + 1) * DAY_MS - OFFSET_MS; }
 function matchMap() { const o = {}; S.matches.forEach((m) => { o[m.id] = m; }); return o; }
+const legsOf = (b) => b.legs || [{ m: b.matchId, k: b.key, o: b.odds, label: b.label, fx: b.fixture }];
+const isOpen = (m, now = Date.now()) => m && m.status === 'scheduled' && ms(m.ko) > now;
 let toastT;
-function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 3200); }
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 3600); }
 const extraCount = markets('', '').reduce((n, g) => n + g.sels.length, 0);
 
 /* ---------- firebase ---------- */
@@ -72,44 +82,113 @@ async function claim() {
   S.busy = true;
   try {
     await updateDoc(doc(db, 'players', S.user.uid), { coins: S.me.coins + DAILY_COINS, lastClaimDay: claimDay() });
-    toast('+' + DAILY_COINS + ' coins. Good luck.');
+    toast(sass.claim());
   } catch (e) { failed(e, 'Already claimed today. Come back tomorrow.'); }
   S.busy = false;
 }
 
-async function place() {
-  const o = S.open;
-  if (!o || S.busy) return;
-  const stake = Math.floor(Number(o.stake));
-  const m = matchMap()[o.mid];
-  if (!m || m.status !== 'scheduled' || ms(m.ko) <= Date.now()) { toast('This match has kicked off. Betting is closed.'); return; }
-  if (!(stake >= 1)) { toast('Enter a stake of at least 1 coin.'); return; }
-  if (stake > S.me.coins) { toast('You only have ' + S.me.coins + ' coins.'); return; }
-  const odds = m.p[o.k], label = selLabel(m.home, m.away, o.k);
-  const betRef = doc(collection(db, 'bets'));
-  const b = writeBatch(db);
-  b.set(betRef, {
-    uid: S.user.uid, name: S.me.name, matchId: m.id, key: o.k, label, fixture: m.home + ' v ' + m.away,
-    stake, odds, status: 'open', placed: serverTimestamp(),
-  });
-  b.update(doc(db, 'players', S.user.uid), { coins: S.me.coins - stake, lastBet: betRef.id });
-  S.busy = true;
-  try {
-    await b.commit();
-    S.open = null;
-    toast(stake + ' coins on ' + label + '.');
-  } catch (e) { failed(e, 'Bet not accepted. The price may have just changed, check it and try again.'); }
-  S.busy = false;
-  renderMatches();
+/* ---------- bet slip ---------- */
+function setSlip(slip) { S.slip = slip; save('fs_slip', slip); renderSlip(); renderMatches(); }
+
+function toggleLeg(mid, k) {
+  const i = S.slip.findIndex((l) => l.m === mid);
+  if (i >= 0 && S.slip[i].k === k) { setSlip(S.slip.filter((_, j) => j !== i)); return; }
+  if (i >= 0) { const s = S.slip.slice(); s[i] = { m: mid, k }; setSlip(s); toast('Swapped your pick for this match. One pick per match.'); return; }
+  if (S.slip.length >= MAX_LEGS) { toast('Max ' + MAX_LEGS + ' picks. Even we have limits.'); return; }
+  setSlip(S.slip.concat({ m: mid, k }));
 }
 
+function slipState() {
+  const mm = matchMap(), now = Date.now();
+  const legs = S.slip.map((l) => {
+    const m = mm[l.m];
+    const ok = isOpen(m, now) && m.p && m.p[l.k] != null;
+    return { ...l, match: m, ok, o: ok ? m.p[l.k] : null, label: m ? selLabel(m.home, m.away, l.k) : 'Match no longer listed', fx: m ? m.home + ' v ' + m.away : '' };
+  });
+  const good = legs.filter((l) => l.ok);
+  return { legs, good, bad: legs.length - good.length, odds: good.length ? comboOdds(good.map((l) => l.o)) : 0 };
+}
+
+function confirmPlace() {
+  const st = slipState(), stake = Math.floor(Number(S.stake));
+  if (!S.me) { toast('Join the game first.'); return; }
+  if (!st.legs.length) return;
+  if (st.bad) { toast('Remove the picks that are closed first.'); return; }
+  if (!(stake >= 1)) { toast('Enter a stake of at least 1 coin.'); return; }
+  if (stake > S.me.coins) { toast(S.me.coins ? 'You only have ' + S.me.coins + ' coins.' : sass.broke()); return; }
+  const ret = Math.round(stake * st.odds);
+  $('confirmTitle').textContent = st.legs.length > 1 ? 'Place this ' + st.legs.length + '-pick multi-bet?' : 'Place this bet?';
+  $('confirmBody').innerHTML = '<ul>' + st.legs.map((l) => '<li><b>' + esc(l.label) + '</b> @ ' + fmtOdds(l.o) + '<br>' + esc(l.fx) + '</li>').join('') + '</ul>'
+    + '<div class="sum"><span>Stake</span><b class="num">' + stake + '</b><span>Odds</span><b class="num">' + fmtOdds(st.odds) + '</b><span>Returns if it wins</span><b class="num">' + ret + '</b></div>'
+    + (st.legs.length > 1 ? '<small>Every pick has to win. One miss and it\'s gone.</small>' : '');
+  $('confirmDlg').returnValue = '';
+  $('confirmDlg').showModal();
+}
+
+async function place() {
+  const st = slipState(), stake = Math.floor(Number(S.stake));
+  if (S.busy || !st.legs.length || st.bad || !(stake >= 1) || stake > S.me.coins) return;
+  const legs = st.legs.map((l) => ({ m: l.m, k: l.k, o: l.o, label: l.label.slice(0, 120), fx: l.fx.slice(0, 120) }));
+  const betRef = doc(collection(db, 'bets'));
+  const b = writeBatch(db);
+  b.set(betRef, { uid: S.user.uid, name: S.me.name, legs, mids: legs.map((l) => l.m), stake, odds: st.odds, status: 'open', placed: serverTimestamp() });
+  b.update(doc(db, 'players', S.user.uid), { coins: S.me.coins - stake, lastBet: betRef.id });
+  S.busy = true;
+  renderSlip();
+  try {
+    await b.commit();
+    setSlip([]);
+    openSheet(false);
+    toast(sass.place(legs.length));
+  } catch (e) { failed(e, 'Bet not accepted. A price may have just changed or a match kicked off. Check your slip and try again.'); }
+  S.busy = false;
+  renderSlip();
+}
+
+function openSheet(on) {
+  S.sheet = on;
+  $('slip').classList.toggle('open', on);
+  $('scrim').hidden = !on;
+  renderSlipBar();
+}
+
+/* ---------- results popup ---------- */
+// Bets settled since this device last looked are shown once, with feeling.
+function checkResults() {
+  if (!S.myBets.length) return;
+  const key = 'fs_seen_' + S.user.uid;
+  const seen = load(key, null);
+  const settled = S.myBets.filter((b) => b.status !== 'open');
+  if (seen === null) { save(key, settled.map((b) => b.id)); return; } // first visit on this device
+  const fresh = settled.filter((b) => !seen.includes(b.id));
+  if (!fresh.length || $('resultDlg').open) return;
+  save(key, seen.concat(fresh.map((b) => b.id)).slice(-300));
+  const won = fresh.filter((b) => b.status === 'won'), lost = fresh.filter((b) => b.status === 'lost'), refunded = fresh.filter((b) => b.status === 'void');
+  const gain = won.reduce((s, b) => s + (b.payout || 0) - b.stake, 0), loss = lost.reduce((s, b) => s + b.stake, 0);
+  const net = gain - loss;
+  let emoji, title, msg;
+  if (won.length && net >= 0) { emoji = '🤑'; title = 'You won ' + won.reduce((s, b) => s + (b.payout || 0), 0) + ' coins'; msg = sass.win(won.reduce((s, b) => s + (b.payout || 0), 0)); }
+  else if (lost.length) { emoji = won.length ? '😬' : '🤡'; title = won.length ? 'Net ' + net + ' coins' : 'You lost ' + loss + ' coins'; msg = sass.lose(loss); }
+  else { emoji = '🙃'; title = 'Refunded'; msg = sass.void(refunded.reduce((s, b) => s + b.stake, 0)); }
+  $('resultEmoji').textContent = emoji;
+  $('resultTitle').textContent = title;
+  $('resultMsg').textContent = msg;
+  $('resultList').innerHTML = fresh.slice(0, 6).map((b) => {
+    const legs = legsOf(b);
+    const what = legs.length > 1 ? legs.length + '-pick multi' : esc(legs[0].label);
+    return '<div>' + what + ': ' + (b.status === 'won' ? '+' + b.payout : b.status === 'lost' ? '−' + b.stake : 'refunded') + '</div>';
+  }).join('');
+  $('resultDlg').showModal();
+}
+
+/* ---------- data ---------- */
 function listen() {
   const uid = S.user.uid;
-  const since = Timestamp.fromMillis(Date.now() - 4 * DAY_MS);
-  subs.push(onSnapshot(query(collection(db, 'matches'), where('ko', '>=', since), orderBy('ko'), limit(400)), (snap) => {
+  const since = Timestamp.fromMillis(Date.now() - 3 * DAY_MS);
+  subs.push(onSnapshot(query(collection(db, 'matches'), where('ko', '>=', since), orderBy('ko'), limit(1500)), (snap) => {
     S.matches = snap.docs.map((d) => ({ ...d.data(), id: d.id })).filter((m) => m.p && m.ko && m.home && m.away);
     S.matchesLoaded = true;
-    renderMatches();
+    renderLeagues(); renderMatches(); renderSlip();
   }, (e) => { console.error(e); S.matchesLoaded = true; renderMatches(); }));
 
   subs.push(onSnapshot(collection(db, 'players'), (snap) => {
@@ -120,22 +199,10 @@ function listen() {
     renderAll();
   }, (e) => { console.error(e); S.meLoaded = true; renderAll(); }));
 
-  let seen = null;
   subs.push(onSnapshot(query(collection(db, 'bets'), where('uid', '==', uid), orderBy('placed', 'desc'), limit(60)), (snap) => {
     S.myBets = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-    // Tell the player when their bets settle while the app is open.
-    if (seen) {
-      let won = 0, lost = 0;
-      S.myBets.forEach((b) => {
-        if (seen[b.id] === 'open' && b.status === 'won') won += b.payout || 0;
-        if (seen[b.id] === 'open' && b.status === 'lost') lost++;
-      });
-      if (won) toast('Results are in. You won ' + won + ' coins.');
-      else if (lost) toast('Results are in. No winners this time.');
-    }
-    seen = {};
-    S.myBets.forEach((b) => { seen[b.id] = b.status; });
-    renderMe();
+    renderMine();
+    if (!snap.metadata.fromCache) checkResults();
   }, (e) => console.error(e)));
 
   subs.push(onSnapshot(query(collection(db, 'bets'), orderBy('placed', 'desc'), limit(15)), (snap) => {
@@ -145,7 +212,7 @@ function listen() {
 
   subs.push(onSnapshot(query(collection(db, 'bets'), where('status', '==', 'open'), limit(1000)), (snap) => {
     S.openBets = snap.docs.map((d) => d.data());
-    renderBoard();
+    renderBoard(); renderMatches();
   }, (e) => console.error(e)));
 }
 
@@ -174,102 +241,153 @@ function renderWallet() {
   $('signOut').hidden = !S.user;
 }
 
-function fixtureCard(m, now, mine) {
-  const ko = new Date(ms(m.ko)), open = m.status === 'scheduled' && ko.getTime() > now, fin = m.status === 'final';
-  const sel = S.open && S.open.mid === m.id ? S.open.k : null;
-  let stakeH = '';
-  if (sel && open) {
-    const coins = S.me ? S.me.coins : 0;
-    stakeH = '<div class="stake"><label for="stakeIn">Stake on <b>' + esc(selLabel(m.home, m.away, sel)) + '</b> @ ' + m.p[sel].toFixed(2) + '</label>'
-      + '<input type="number" id="stakeIn" min="1" max="' + coins + '" step="1" inputmode="numeric" value="' + S.open.stake0 + '">'
-      + [10, 25, 50].map((a) => '<button class="chip" data-amt="' + a + '"' + (a > coins ? ' disabled' : '') + '>' + a + '</button>').join('')
-      + '<button class="chip" data-amt="' + coins + '">All in</button>'
-      + '<span class="ret">Returns <b class="num" id="retOut"></b></span>'
-      + '<button class="btn ghost" data-cancel="1">Cancel</button><button class="btn" data-place="1"' + (S.busy ? ' disabled' : '') + '>Place bet</button></div>';
-  }
-  let h = '<article class="fx"><div><div class="fx-meta"><b>' + esc(fmtTime(ko)) + '</b><span>' + esc(m.lg) + '</span>'
+function renderLeagues() {
+  const now = Date.now(), count = {};
+  S.matches.forEach((m) => { if (isOpen(m, now)) count[m.sk] = (count[m.sk] || 0) + 1; });
+  const total = Object.values(count).reduce((a, b) => a + b, 0);
+  let h = '<option value="all">⚽ All leagues (' + total + ')</option>';
+  GROUPS.forEach((g) => {
+    const ls = LEAGUES.filter((l) => l.group === g && count[l.slug]);
+    if (ls.length) h += '<optgroup label="' + esc(g) + '">' + ls.map((l) => '<option value="' + l.slug + '">' + l.flag + ' ' + esc(l.name) + ' (' + count[l.slug] + ')</option>').join('') + '</optgroup>';
+  });
+  const other = Object.keys(count).filter((s) => !BY_SLUG[s]);
+  if (other.length) h += '<optgroup label="Other">' + other.map((s) => '<option value="' + esc(s) + '">' + esc(s) + ' (' + count[s] + ')</option>').join('') + '</optgroup>';
+  if (S.league !== 'all' && !count[S.league]) S.league = 'all';
+  const sel = $('league');
+  if (last.league !== h) { last.league = h; sel.innerHTML = h; }
+  sel.value = S.league;
+}
+
+function inDay(m) {
+  if (S.day === 'all') return true;
+  const d = new Date(ms(m.ko)), t = new Date();
+  if (S.day === 'today') return dayKey(d) === dayKey(t);
+  if (S.day === 'tomorrow') { t.setDate(t.getDate() + 1); return dayKey(d) === dayKey(t); }
+  if (S.day === 'weekend') { const wd = d.getDay(), soon = ms(m.ko) - Date.now() < 7 * DAY_MS; return soon && (wd === 0 || wd === 6 || (wd === 5 && d.getHours() >= 17)); }
+  return true;
+}
+
+function crowd() {
+  const c = {}, me = S.user && S.user.uid;
+  S.openBets.forEach((b) => { if (b.uid === me) return; new Set(legsOf(b).map((l) => l.m)).forEach((m) => { (c[m] = c[m] || new Set()).add(b.uid); }); });
+  return c;
+}
+
+function fixtureCard(m, now, mine, friends) {
+  const ko = new Date(ms(m.ko)), open = isOpen(m, now), fin = m.status === 'final';
+  const inSlip = S.slip.find((l) => l.m === m.id), sel = inSlip ? inSlip.k : null;
+  const L = BY_SLUG[m.sk];
+  let h = '<article class="fx"><div><div class="fx-meta"><b>' + esc(fmtTime(ko)) + '</b><span>' + (L ? L.flag + ' ' : '') + esc(m.lg) + '</span>'
+    + (m.src === 'elo' && open ? '<span class="tag" title="No bookmaker price yet; odds from World Football Elo ratings">Elo odds</span>' : '')
+    + (friends ? '<span class="crowd">👥 ' + friends + (friends === 1 ? ' friend' : ' friends') + ' on this</span>' : '')
     + (fin ? '<span>Full time</span>' : m.status === 'void' ? '<span>Called off, stakes returned</span>' : !open ? '<span>Kicked off, result pending</span>' : '') + '</div>'
     + '<div class="teams">' + esc(m.home) + '<i>v</i>' + esc(m.away) + '</div></div>';
   if (fin) h += '<div class="score num">' + m.sh + ' – ' + m.sa + '</div>';
   else {
     h += '<div class="odds">' + ['h', 'd', 'a'].map((p) => {
-      const k = '1x2:' + p, name = selLabel(m.home, m.away, k);
+      const k = '1x2:' + p;
       return '<button data-mid="' + esc(m.id) + '" data-k="' + k + '" aria-pressed="' + (sel === k) + '"' + (open ? '' : ' disabled')
-        + ' aria-label="' + esc(name) + ' at ' + m.p[k].toFixed(2) + '"><span>' + (p === 'h' ? '1' : p === 'd' ? 'X' : '2') + '</span><b class="num">' + m.p[k].toFixed(2) + '</b></button>';
+        + ' aria-label="' + esc(selLabel(m.home, m.away, k)) + ' at ' + m.p[k].toFixed(2) + '"><span>' + (p === 'h' ? '1' : p === 'd' ? 'X' : '2') + '</span><b class="num">' + m.p[k].toFixed(2) + '</b></button>';
     }).join('') + '</div>';
   }
-  if (mine.length) h += '<div class="yours">Your bets: ' + mine.map((b) => b.stake + ' on ' + esc(b.label) + ' @ ' + Number(b.odds).toFixed(2)).join(' · ') + '</div>';
-  if (sel && sel.startsWith('1x2:')) h += stakeH;
+  if (mine.length) h += '<div class="yours">Your open bets here: ' + mine.length + '</div>';
+  if (sel && !sel.startsWith('1x2:')) h += '<div class="yours">In your slip: <b>' + esc(selLabel(m.home, m.away, sel)) + '</b> @ ' + fmtOdds(m.p[sel]) + '</div>';
   if (open) {
     const exp = S.exp === m.id;
     h += '<button class="more" data-more="' + esc(m.id) + '" aria-expanded="' + exp + '">' + (exp ? 'Hide extra bets' : '+ ' + extraCount + ' more bets on this match') + '</button>';
     if (exp) {
-      h += '<div class="mk">' + markets(m.home, m.away).map((g) => {
-        let has = false;
-        const gh = '<div><h4>' + esc(g.name) + '</h4><div class="sels">' + g.sels.map((s) => {
-          if (s[0] === sel) has = true;
-          return '<button data-mid="' + esc(m.id) + '" data-k="' + esc(s[0]) + '" aria-pressed="' + (s[0] === sel) + '" aria-label="' + esc(s[2]) + '"><span>' + esc(s[1]) + '</span><b class="num">' + Number(m.p[s[0]]).toFixed(2) + '</b></button>';
-        }).join('') + '</div>' + (has ? stakeH : '') + '</div>';
-        return gh;
-      }).join('') + '</div>';
+      h += '<div class="mk">' + markets(m.home, m.away).map((g) => '<div><h4>' + esc(g.name) + '</h4><div class="sels">' + g.sels.map((s) =>
+        '<button data-mid="' + esc(m.id) + '" data-k="' + esc(s[0]) + '" aria-pressed="' + (s[0] === sel) + '" aria-label="' + esc(s[2]) + '"><span>' + esc(s[1]) + '</span><b class="num">' + fmtOdds(m.p[s[0]]) + '</b></button>').join('') + '</div></div>').join('') + '</div>';
     }
   }
   return h + '</article>';
 }
 
 function renderMatches() {
-  const now = Date.now();
-  const leagues = [];
-  S.matches.forEach((m) => { if (!leagues.includes(m.lg)) leagues.push(m.lg); });
-  paint('chips', leagues.length < 2 ? '' : ['all'].concat(leagues.sort()).map((l) =>
-    '<button class="chip" data-league="' + esc(l) + '" aria-pressed="' + (S.league === l) + '">' + (l === 'all' ? 'All' : esc(l)) + '</button>').join(''));
-  const list = S.matches.filter((m) => S.league === 'all' || m.lg === S.league);
+  const now = Date.now(), q = S.q.trim().toLowerCase();
+  const list = S.matches.filter((m) => (S.league === 'all' || m.sk === S.league) && (!q || (m.home + ' ' + m.away).toLowerCase().includes(q)));
   const myOpen = {};
-  S.myBets.forEach((b) => { if (b.status === 'open') (myOpen[b.matchId] = myOpen[b.matchId] || []).push(b); });
+  S.myBets.forEach((b) => { if (b.status === 'open') new Set(legsOf(b).map((l) => l.m)).forEach((m) => { (myOpen[m] = myOpen[m] || []).push(b); }); });
+  const fr = crowd();
   let h = '';
-  if (!S.user) h = '<div class="empty">Sign in to see this week\'s matches.</div>';
+  if (!configured) h = '<div class="empty">Waiting for the Firebase config.</div>';
+  else if (!S.user) h = '<div class="empty">Sign in to see this week\'s matches.</div>';
   else if (!S.matchesLoaded) h = '<div class="empty">Loading this week\'s matches…</div>';
-  else if (!list.length) h = '<div class="empty">No fixtures loaded right now. New matches are added before each matchday.</div>';
   else {
-    const up = list.filter((m) => m.status === 'scheduled' && ms(m.ko) > now);
+    const up = list.filter((m) => isOpen(m, now) && inDay(m));
     const wait = list.filter((m) => m.status === 'scheduled' && ms(m.ko) <= now);
-    const done = list.filter((m) => m.status === 'final' || m.status === 'void').reverse().slice(0, 10);
+    const done = list.filter((m) => m.status === 'final' || m.status === 'void').reverse().slice(0, 20);
+    const card = (m) => fixtureCard(m, now, myOpen[m.id] || [], fr[m.id] ? fr[m.id].size : 0);
     let cur = '';
-    up.forEach((m) => {
+    up.slice(0, S.shown).forEach((m) => {
       const d = new Date(ms(m.ko)), k = dayKey(d);
       if (k !== cur) { cur = k; h += '<div class="day">' + esc(fmtDay(d)) + '</div>'; }
-      h += fixtureCard(m, now, myOpen[m.id] || []);
+      h += card(m);
     });
-    if (!up.length) h += '<div class="empty">Every loaded match has kicked off. The next round appears here soon.</div>';
-    if (wait.length) { h += '<div class="day">In play or waiting for the result</div>'; wait.forEach((m) => { h += fixtureCard(m, now, myOpen[m.id] || []); }); }
-    if (done.length) { h += '<div class="day">Recent results</div>'; done.forEach((m) => { h += fixtureCard(m, now, []); }); }
+    if (up.length > S.shown) h += '<button class="more-btn" data-showmore="1">Show more games (' + (up.length - S.shown) + ' more)</button>';
+    if (!up.length) h += '<div class="empty">' + (q ? 'No upcoming match for "' + esc(S.q) + '".' : 'No upcoming matches here. Try another league or day.') + '</div>';
+    if (wait.length || done.length) {
+      h += '<button class="more-btn" data-showdone="1" aria-expanded="' + S.showDone + '">' + (S.showDone ? 'Hide' : 'Show') + ' live and recent results (' + (wait.length + done.length) + ')</button>';
+      if (S.showDone) {
+        if (wait.length) { h += '<div class="day">In play or waiting for the result</div>'; wait.forEach((m) => { h += card(m); }); }
+        if (done.length) { h += '<div class="day">Recent results</div>'; done.forEach((m) => { h += card(m); }); }
+      }
+    }
   }
   paint('matches', h);
-  const inp = $('stakeIn');
-  if (inp && S.open) { if (String(inp.value) !== String(S.open.stake)) inp.value = S.open.stake; updateReturn(); }
 }
 
-function updateReturn() {
-  const out = $('retOut');
-  if (!out || !S.open) return;
-  const m = matchMap()[S.open.mid], st = Math.floor(Number(S.open.stake));
-  out.textContent = m && st >= 1 ? Math.round(st * m.p[S.open.k]) + ' coins' : '–';
+function renderSlip() {
+  const st = slipState(), n = st.legs.length;
+  let h = '<div class="slip-head"><h2>Bet slip' + (n ? ' (' + n + ')' : '') + '</h2><div>'
+    + (n ? '<button class="linkish" data-clear="1">Clear</button> ' : '')
+    + '<button class="btn ghost slip-close" data-closeslip="1" aria-label="Close bet slip">Close</button></div></div>';
+  if (!n) h += '<div class="empty">Tap prices to add picks. Picks from different matches make a multi-bet: the odds multiply, and every pick has to win.</div>';
+  else {
+    h += '<div class="slip-legs">' + st.legs.map((l, i) => '<div class="leg' + (l.ok ? '' : ' bad') + '"><div class="t">' + esc(l.label) + '</div>'
+      + '<div class="s">' + (l.ok ? esc(l.fx) : (l.match ? esc(l.fx) + ' · closed, remove it' : 'Match no longer listed, remove it')) + '</div>'
+      + '<div class="o num">' + (l.ok ? fmtOdds(l.o) : '–') + '</div><button class="x" data-rm="' + i + '" aria-label="Remove ' + esc(l.label) + '">×</button></div>').join('') + '</div>';
+    const coins = S.me ? S.me.coins : 0, stake = Math.floor(Number(S.stake));
+    h += '<div class="slip-total"><span>' + (n > 1 ? n + '-pick multi odds' : 'Odds') + '</span><b class="num">' + (st.good.length ? fmtOdds(st.odds) : '–') + '</b></div>'
+      + '<div class="slip-stake"><label for="stakeIn">Stake</label><input type="number" id="stakeIn" min="1" step="1" inputmode="numeric" value="' + esc(S.stake) + '">'
+      + [10, 25, 50].map((a) => '<button class="chip" data-amt="' + a + '"' + (a > coins ? ' disabled' : '') + '>' + a + '</button>').join('')
+      + '<button class="chip" data-amt="' + coins + '"' + (coins ? '' : ' disabled') + '>All in</button></div>'
+      + '<div class="slip-ret">Returns <b class="num" id="retOut">' + (stake >= 1 && st.good.length ? Math.round(stake * st.odds) + ' coins' : '–') + '</b></div>'
+      + '<button class="btn slip-place" data-place="1"' + (S.busy || st.bad || !S.me ? ' disabled' : '') + '>' + (S.busy ? 'Placing…' : !S.me ? 'Join the game to bet' : 'Place bet') + '</button>';
+  }
+  const el = $('slip');
+  if (last.slip !== h) {
+    const focused = document.activeElement && document.activeElement.id === 'stakeIn';
+    last.slip = h; el.innerHTML = h;
+    if (focused && $('stakeIn')) $('stakeIn').focus();
+  }
+  renderSlipBar();
+}
+
+function renderSlipBar() {
+  const st = slipState(), n = st.legs.length, bar = $('slipBar');
+  bar.hidden = !n || S.sheet;
+  if (n) bar.innerHTML = '<span>🧾 Bet slip · ' + n + (n === 1 ? ' pick' : ' picks') + '</span><span class="num">@ ' + (st.good.length ? fmtOdds(st.odds) : '–') + ' ›</span>';
 }
 
 function betRow(b) {
+  const legs = legsOf(b), res = b.res || [];
   const right = b.status === 'open' ? '<span class="num">' + Math.round(b.stake * b.odds) + '</span>'
     : b.status === 'won' ? '<span class="num won-n">+' + b.payout + '</span>'
     : b.status === 'lost' ? '<span class="num lost-n">−' + b.stake + '</span>' : '<span class="num">' + b.stake + '</span>';
-  return '<div class="row"><div class="t">' + esc(b.label) + ' <span class="num">@ ' + Number(b.odds).toFixed(2) + '</span></div>'
-    + '<div class="s">' + esc(b.fixture) + (b.score ? ' · ' + esc(b.score) : '') + ' · staked ' + b.stake + ' <span class="pill ' + b.status + '">' + (b.status === 'void' ? 'refunded' : b.status) + '</span></div>'
-    + '<div class="r">' + right + '</div></div>';
+  const title = legs.length > 1 ? legs.length + '-pick multi' : esc(legs[0].label);
+  return '<div class="row"><div class="t">' + title + ' <span class="num">@ ' + fmtOdds(b.odds) + '</span></div>'
+    + '<div class="s">' + (legs.length > 1 ? '' : esc(legs[0].fx) + (b.score ? ' · ' + esc(b.score) : '') + ' · ') + 'staked ' + b.stake + ' <span class="pill ' + b.status + '">' + (b.status === 'void' ? 'refunded' : b.status) + '</span></div>'
+    + '<div class="r">' + right + '</div>'
+    + (legs.length > 1 ? '<div class="legs-mini">' + legs.map((l, i) => '<span class="' + (res[i] || '') + '">' + (res[i] === 'won' ? '✓ ' : res[i] === 'lost' ? '✗ ' : res[i] === 'void' ? '↺ ' : '• ') + esc(l.label) + ' @ ' + fmtOdds(l.o) + ' · ' + esc(l.fx) + '</span>').join('') + '</div>' : '')
+    + '</div>';
 }
 
 function renderMine() {
   const bets = S.myBets;
   let h;
   if (!S.me) h = '<div class="empty">Join the game, claim your coins, then tap a price next to a match.</div>';
-  else if (!bets.length) h = '<div class="empty">No bets yet. Tap a price next to a match to place your first one.</div>';
+  else if (!bets.length) h = '<div class="empty">No bets yet. Tap prices to fill your bet slip.</div>';
   else {
     const open = bets.filter((b) => b.status === 'open'), old = bets.filter((b) => b.status !== 'open');
     h = '';
@@ -286,18 +404,19 @@ function renderBoard() {
   const uid = S.user && S.user.uid;
   paint('board', !ps.length ? '<div class="empty">Everyone who joins shows up here, ranked by coins.</div>'
     : '<table><thead><tr><th>#</th><th>Player</th><th>W–L</th><th>In play</th><th>Coins</th></tr></thead><tbody>'
-      + ps.map((p, i) => '<tr' + (p.id === uid ? ' class="me"' : '') + '><td class="num">' + (i + 1) + '</td><td>' + esc(p.name || 'Player') + (p.id === uid ? ' (you)' : '')
+      + ps.map((p, i) => '<tr' + (p.id === uid ? ' class="me"' : '') + '><td class="num">' + (i + 1) + '</td><td>' + (i === 0 && p.coins ? '👑 ' : '') + esc(p.name || 'Player') + (p.id === uid ? ' (you)' : '')
+        + (!p.coins && !inplay[p.id] ? ' <span class="broke" title="Broke">💸 broke</span>' : '')
         + '</td><td class="num">' + (p.won || 0) + '–' + (p.lost || 0) + '</td><td class="num">' + (inplay[p.id] || 0) + '</td><td class="c num">' + (p.coins || 0) + '</td></tr>').join('')
       + '</tbody></table>');
-  paint('feed', S.feed.length ? '<div class="slip">' + S.feed.map((b) =>
-    '<div class="row"><div class="t">' + esc(b.name || 'Player') + ' · ' + b.stake + ' on ' + esc(b.label) + '</div>'
-    + '<div class="s">' + esc(b.fixture) + ' <span class="pill ' + b.status + '">' + (b.status === 'void' ? 'refunded' : b.status) + '</span></div>'
-    + '<div class="r num">' + Number(b.odds).toFixed(2) + '</div></div>').join('') + '</div>'
-    : '<div class="empty">Nobody has placed a bet yet.</div>');
+  paint('feed', S.feed.length ? '<div class="slip">' + S.feed.map((b) => {
+    const legs = legsOf(b);
+    return '<div class="row"><div class="t">' + esc(b.name || 'Player') + ' · ' + b.stake + ' on ' + (legs.length > 1 ? 'a ' + legs.length + '-pick multi' : esc(legs[0].label)) + '</div>'
+      + '<div class="s">' + (legs.length > 1 ? legs.map((l) => esc(l.label)).join(', ') : esc(legs[0].fx)) + ' <span class="pill ' + b.status + '">' + (b.status === 'void' ? 'refunded' : b.status) + '</span></div>'
+      + '<div class="r num">' + fmtOdds(b.odds) + '</div></div>';
+  }).join('') + '</div>' : '<div class="empty">Nobody has placed a bet yet.</div>');
 }
 
-function renderMe() { renderWallet(); renderMatches(); renderMine(); }
-function renderAll() { renderMe(); renderBoard(); }
+function renderAll() { renderWallet(); renderMatches(); renderSlip(); renderMine(); renderBoard(); }
 
 /* ---------- events ---------- */
 $('tabs').addEventListener('click', (e) => {
@@ -312,46 +431,57 @@ $('wallet').addEventListener('click', (e) => {
   if (e.target.id === 'signInBtn') signIn();
 });
 $('signOut').addEventListener('click', () => signOut(auth));
-$('chips').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-league]');
+$('league').addEventListener('change', (e) => { S.league = e.target.value; S.shown = PAGE; renderMatches(); });
+$('days').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-day]');
   if (!b) return;
-  S.league = b.dataset.league;
+  S.day = b.dataset.day; S.shown = PAGE;
+  Array.from($('days').children).forEach((x) => x.setAttribute('aria-pressed', x === b));
   renderMatches();
 });
+$('search').addEventListener('input', (e) => { S.q = e.target.value; S.shown = PAGE; renderMatches(); });
 $('matches').addEventListener('click', (e) => {
   const t = e.target.closest('button');
   if (!t) return;
-  if (t.dataset.more) {
-    S.exp = S.exp === t.dataset.more ? null : t.dataset.more;
-    if (S.open && !S.open.k.startsWith('1x2:')) S.open = null;
-    renderMatches();
-  } else if (t.dataset.k) {
+  if (t.dataset.more) { S.exp = S.exp === t.dataset.more ? null : t.dataset.more; renderMatches(); }
+  else if (t.dataset.showmore) { S.shown += PAGE; renderMatches(); }
+  else if (t.dataset.showdone) { S.showDone = !S.showDone; renderMatches(); }
+  else if (t.dataset.k) {
     if (!S.me) { toast('Join the game first.'); const n = $('nameIn'); if (n) n.focus(); return; }
-    if (!S.me.coins) { toast((S.me.lastClaimDay || 0) >= claimDay() ? 'You are out of coins until tomorrow.' : 'Claim your ' + DAILY_COINS + ' coins first.'); return; }
-    const st = Math.min(25, S.me.coins);
-    S.open = { mid: t.dataset.mid, k: t.dataset.k, stake: st, stake0: st };
-    renderMatches();
-    const i = $('stakeIn');
-    if (i) { i.focus(); i.select(); }
-  } else if (t.dataset.amt && S.open) {
-    S.open.stake = S.open.stake0 = Number(t.dataset.amt);
-    renderMatches();
-  } else if (t.dataset.cancel) { S.open = null; renderMatches(); }
-  else if (t.dataset.place) place();
+    toggleLeg(t.dataset.mid, t.dataset.k);
+  }
 });
-$('matches').addEventListener('input', (e) => { if (e.target.id === 'stakeIn' && S.open) { S.open.stake = e.target.value; updateReturn(); } });
-$('matches').addEventListener('keydown', (e) => { if (e.target.id === 'stakeIn' && e.key === 'Enter') { e.preventDefault(); place(); } });
+$('slip').addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.dataset.rm) setSlip(S.slip.filter((_, i) => i !== Number(t.dataset.rm)));
+  else if (t.dataset.clear) setSlip([]);
+  else if (t.dataset.closeslip) openSheet(false);
+  else if (t.dataset.amt) { S.stake = Number(t.dataset.amt); renderSlip(); }
+  else if (t.dataset.place) confirmPlace();
+});
+$('slip').addEventListener('input', (e) => {
+  if (e.target.id !== 'stakeIn') return;
+  S.stake = e.target.value;
+  const st = slipState(), stake = Math.floor(Number(S.stake));
+  $('retOut').textContent = stake >= 1 && st.good.length ? Math.round(stake * st.odds) + ' coins' : '–';
+});
+$('slip').addEventListener('keydown', (e) => { if (e.target.id === 'stakeIn' && e.key === 'Enter') { e.preventDefault(); confirmPlace(); } });
+$('slipBar').addEventListener('click', () => openSheet(true));
+$('scrim').addEventListener('click', () => openSheet(false));
+$('confirmDlg').addEventListener('close', () => { if ($('confirmDlg').returnValue === 'ok') place(); });
 
 /* ---------- boot ---------- */
+renderSlip();
 if (!configured) { S.authed = true; renderAll(); }
 else {
   onAuthStateChanged(auth, (user) => {
     subs.splice(0).forEach((u) => u());
-    Object.assign(S, { user, authed: true, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [], open: null });
+    Object.assign(S, { user, authed: true, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [] });
     if (user) listen();
     renderAll();
   });
-  setInterval(() => { if (S.me) renderWallet(); if (!S.open) renderMatches(); }, 30000);
+  setInterval(() => { if (S.me) renderWallet(); renderMatches(); renderSlip(); }, 30000);
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

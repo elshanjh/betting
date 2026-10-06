@@ -28,8 +28,6 @@
     <div class="wallet" id="wallet"><small>Loading…</small></div>
   </header>
 
-  <div class="banner" id="banner" hidden></div>
-
   <nav class="tabs" id="tabs" aria-label="Sections">
     <button data-tab="matches" aria-selected="true">Fixtures</button>
     <button data-tab="mine" aria-selected="false">Your bets</button>
@@ -38,13 +36,23 @@
 
   <div class="app" id="app" data-tab="matches">
     <section class="panel" id="p-matches">
-      <div class="panel-head"><h2>Fixtures</h2><div class="chips" id="chips"></div></div>
+      <div class="filters">
+        <label class="sel"><span class="sr">League</span><select id="league"></select></label>
+        <div class="chips" id="days" role="group" aria-label="Day">
+          <button class="chip" data-day="all" aria-pressed="true">All days</button>
+          <button class="chip" data-day="today" aria-pressed="false">Today</button>
+          <button class="chip" data-day="tomorrow" aria-pressed="false">Tomorrow</button>
+          <button class="chip" data-day="weekend" aria-pressed="false">Weekend</button>
+        </div>
+        <input type="search" id="search" placeholder="Search a team" autocomplete="off" aria-label="Search a team">
+      </div>
       <div class="list" id="matches"><div class="empty">Loading this week's matches…</div></div>
     </section>
     <div class="side">
+      <section class="slip-wrap" id="slip" aria-label="Bet slip"></section>
       <section class="panel" id="p-mine">
         <h2>Your bets</h2>
-        <div id="mine"><div class="empty">Tap a price next to a match to place your first bet.</div></div>
+        <div id="mine"><div class="empty">Tap a price next to a match to start a bet slip.</div></div>
       </section>
       <section class="panel" id="p-board">
         <h2>Table</h2>
@@ -55,8 +63,33 @@
     </div>
   </div>
 
-  <footer>1 = home win, X = draw, 2 = away win. Match prices are DraftKings odds via ESPN; the extra markets come from a goals model fitted to them. Bets settle on the final score. Coins have no value and cannot be bought, sold or cashed out. <button class="linkish" id="signOut" hidden>Sign out</button></footer>
+  <footer>1 = home win, X = draw, 2 = away win. Tap prices from different matches to build a multi-bet (up to 6 picks): every pick has to win, and the odds multiply. Club odds are DraftKings prices via ESPN; national-team odds without a bookmaker price come from World Football Elo ratings. Bets settle on the final score. Coins have no value and cannot be bought, sold or cashed out. <button class="linkish" id="signOut" hidden>Sign out</button></footer>
 </div>
+
+<button class="slipbar" id="slipBar" hidden></button>
+<div class="scrim" id="scrim" hidden></div>
+
+<dialog id="confirmDlg" aria-labelledby="confirmTitle">
+  <form method="dialog" class="dlg">
+    <h2 id="confirmTitle">Place this bet?</h2>
+    <div id="confirmBody"></div>
+    <div class="dlg-actions">
+      <button class="btn ghost" value="cancel">Cancel</button>
+      <button class="btn" value="ok" id="confirmOk">Yes, place it</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="resultDlg" aria-labelledby="resultTitle">
+  <form method="dialog" class="dlg result">
+    <div class="big" id="resultEmoji" aria-hidden="true"></div>
+    <h2 id="resultTitle"></h2>
+    <p id="resultMsg"></p>
+    <div id="resultList"></div>
+    <div class="dlg-actions"><button class="btn" value="ok">I accept my fate</button></div>
+  </form>
+</dialog>
+
 <div id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
 </body>

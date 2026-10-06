@@ -147,3 +147,45 @@ export function priceMap(home, away, o) {
   }));
   return p;
 }
+
+// 1X2 odds from an Elo rating difference (home minus away, home advantage
+// already included), for matches without bookmaker prices. Fits the same
+// goals model so the result's expected score matches Elo's win expectancy.
+export function eloOdds(dr) {
+  const we = 1 / (Math.pow(10, -dr / 400) + 1), T = 2.6;
+  let a = 0.02, b = 0.98, r;
+  for (let j = 0; j < 30; j++) {
+    const sp = (a + b) / 2;
+    r = hda(grid(T * sp, T * (1 - sp)));
+    if (r[0] + r[1] / 2 < we) a = sp; else b = sp;
+  }
+  const odd = (p) => Math.min(51, Math.max(1.01, Math.round((MARGIN * 100) / p) / 100));
+  return { h: odd(r[0]), d: odd(r[1]), a: odd(r[2]) };
+}
+
+export const MAX_LEGS = 6; // firestore.rules checks at most 6 legs
+export const MAX_ODDS = 1000;
+
+// Combined price of a multi-bet: the product of its legs, capped.
+export function comboOdds(odds) {
+  return Math.min(MAX_ODDS, Math.round(odds.reduce((x, o) => x * o, 1) * 100) / 100);
+}
+
+// Result of a bet given its legs and the matches they are on.
+// Returns { status: 'open'|'won'|'lost'|'void', res: [...per leg], odds }.
+// A lost leg loses the bet at once; a void leg counts as odds 1; two legs on
+// the same match make the whole bet void (refund).
+export function judge(legs, matches) {
+  const res = legs.map((l) => {
+    const m = matches[l.m];
+    if (!m || m.status === 'scheduled') return 'open';
+    if (m.status === 'void') return 'void';
+    return outcome(l.k, m.sh, m.sa);
+  });
+  if (new Set(legs.map((l) => l.m)).size !== legs.length) return { status: 'void', res, odds: 1 };
+  if (res.includes('lost')) return { status: 'lost', res, odds: 0 };
+  if (res.includes('open')) return { status: 'open', res, odds: 0 };
+  const live = legs.filter((l, i) => res[i] === 'won').map((l) => l.o);
+  if (!live.length) return { status: 'void', res, odds: 1 };
+  return { status: 'won', res, odds: comboOdds(live) };
+}

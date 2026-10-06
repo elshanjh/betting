@@ -105,16 +105,34 @@ of this against the Firestore emulator.
 
 ## Leagues and the data source
 
-Default leagues: Premier League, La Liga, Serie A, Bundesliga, Ligue 1 and
-Champions League. To change them, set `LEAGUES` in
-`.github/workflows/sync.yml` to a comma list of ESPN slugs, for example
-`eng.1,eng.2,tur.1,uefa.europa`. The slug is the part of an ESPN URL like
-`espn.com/soccer/league/_/name/eng.1`.
+About 45 competitions are loaded, grouped in the league picker: the top five
+leagues plus Turkey's Süper Lig, the three European cups, national-team
+tournaments (World Cup, Euros, Nations League, qualifiers, friendlies, Copa
+América, AFCON, Asian Cup), more European leagues, domestic cups, and MLS,
+Brazil, Argentina, Mexico, Saudi Arabia and the Libertadores. Competitions
+with no games in the next week simply don't show up.
 
-ESPN's feed is free and unlimited but unofficial: it is what espn.com uses
-itself, not a documented API, so ESPN could change it. If that happens the
-sync job fails loudly in the Actions tab, and only `scripts/sync.mjs` needs
-updating.
+The list lives in `public/leagues.js`. To add a competition, find its slug in
+an ESPN URL such as `espn.com/soccer/league/_/name/tur.1` and add a row.
+
+- **Club odds** are DraftKings prices from ESPN's scoreboard feed.
+- **National-team odds**: ESPN often has no bookmaker price for these, so the
+  app calculates them from [World Football Elo ratings](https://www.eloratings.net)
+  (home advantage included). Those matches carry an "Elo odds" tag.
+
+ESPN's feed and eloratings.net are free and need no key, but neither is an
+official API, so they could change. If that happens the sync job fails
+loudly in the Actions tab, and only `scripts/sync.mjs` needs updating.
+
+## Multi-bets
+
+Tap prices on different matches to fill the bet slip (side panel on a
+computer, the green bar at the bottom on a phone). One pick makes a single;
+2 to 6 picks make a multi-bet: the odds multiply and every pick has to win.
+A lost pick settles the whole bet as lost right away; a called-off match
+counts as odds 1. There is always a confirmation before a bet is placed.
+Six is the limit because the security rules check every pick, and Firestore
+caps how much work one rule check can do.
 
 ## Local development
 
@@ -130,8 +148,9 @@ starts empty. To fill it with fixtures, run the sync job against the emulator:
 
 ## Ideas for later
 
-- Push notifications when bets settle (Firebase Cloud Messaging).
+- Push notifications to phones when bets settle (Firebase Cloud Messaging;
+  needs a Web Push key from the Firebase console).
 - Private leagues: a `groups` collection and a join code.
-- Accumulators (multi-bets).
+- Weekly or monthly seasons with a reset and a champion.
 - App Store / Play Store versions with Capacitor. Not needed to use it on a
   phone, and simulated-gambling apps get extra scrutiny in store review.

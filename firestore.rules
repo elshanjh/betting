@@ -80,27 +80,44 @@ service cloud.firestore {
       allow create: if signedIn() && isValidBet(request.resource.data);
       allow update, delete: if false;
 
+      // A bet has 1 to 6 legs (a multi-bet when more than one). Rules have no
+      // loops, so each possible leg index is checked explicitly. (More legs
+      // would hit the 1000-expression limit for one request.)
       function isValidBet(b) {
         let me = playerPath(request.auth.uid);
-        let m = get(/databases/$(database)/documents/matches/$(b.matchId)).data;
-        return b.keys().hasOnly(['uid', 'name', 'matchId', 'key', 'label', 'fixture', 'stake', 'odds', 'status', 'placed'])
+        return b.keys().hasOnly(['uid', 'name', 'legs', 'mids', 'stake', 'odds', 'status', 'placed'])
           && b.uid == request.auth.uid
           && b.status == 'open'
           && b.placed == request.time
           && b.stake is int && b.stake >= 1
           && b.name is string && b.name.size() <= 20
-          && b.label is string && b.label.size() <= 120
-          && b.fixture is string && b.fixture.size() <= 120
-          && b.matchId is string
-          && b.key is string
-          // the match is still open and the odds are exactly the published price
-          && m.status == 'scheduled'
-          && m.ko > request.time
-          && b.key in m.p
-          && b.odds == m.p[b.key]
+          && b.odds is number && b.odds >= 1
+          && b.legs is list && b.legs.size() >= 1 && b.legs.size() <= 6
+          && b.mids is list && b.mids.size() == b.legs.size()
+          && leg(b, 0) && leg(b, 1) && leg(b, 2)
+          && leg(b, 3) && leg(b, 4) && leg(b, 5)
           // the stake is paid for in the same batch
           && getAfter(me).data.lastBet == betId
           && getAfter(me).data.coins == get(me).data.coins - b.stake;
+      }
+
+      function leg(b, i) {
+        return b.legs.size() <= i || legOk(b.legs[i], b.mids[i]);
+      }
+
+      // The match is still open and the price is exactly the published one.
+      // (Payouts are recomputed from the legs by the sync job.)
+      function legOk(l, mid) {
+        let m = get(/databases/$(database)/documents/matches/$(l.m)).data;
+        return l is map
+          && l.keys().hasOnly(['m', 'k', 'o', 'label', 'fx'])
+          && l.m is string && l.m == mid
+          && l.k is string
+          && l.label is string && l.label.size() <= 120
+          && l.fx is string && l.fx.size() <= 120
+          && m.status == 'scheduled'
+          && m.ko > request.time
+          && l.o == m.p[l.k]; // an unknown key is an error, so denied
       }
     }
 
