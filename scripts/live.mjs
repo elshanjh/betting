@@ -12,7 +12,7 @@ import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { livePrices, LIVE_CLOSE_MIN } from '../public/markets.js';
 import { LEAGUES } from '../public/leagues.js';
-import { parse, settle } from './lib.mjs';
+import { parse, settle, playedIds } from './lib.mjs';
 
 const env = process.env;
 const API = env.ESPN_BASE || 'https://site.api.espn.com/apis/site/v2/sports/soccer';
@@ -67,7 +67,7 @@ async function tick(watch) {
         if (prev && prev.score !== score) goalAt[m.id] = now;
         const susp = min >= LIVE_CLOSE_MIN || now - (goalAt[m.id] || 0) < GOAL_PAUSE;
         const p = livePrices(m.o, e.sh, e.sa, min);
-        const doc = { sk: m.sk, lg: m.lg, home: m.home, away: m.away, ko: m.ko, sh: e.sh, sa: e.sa, min, clk: e.clock, shown: e.shown, status: e.status, susp, p, done: false };
+        const doc = { sk: m.sk, lg: m.lg, home: m.home, away: m.away, hl: m.hl || '', al: m.al || '', ko: m.ko, sh: e.sh, sa: e.sa, min, clk: e.clock, shown: e.shown, status: e.status, susp, p, done: false };
         const sig = JSON.stringify([score, min, susp, e.status, e.shown]);
         // Rewrite at least every 40s so the freshness check in the rules passes.
         if (!prev || prev.sig !== sig || now - prev.at > 40e3) {
@@ -77,7 +77,7 @@ async function tick(watch) {
         }
       } else if (e.state === 'post' || OFF.has(e.status)) {
         if (DONE.has(e.status) && Number.isInteger(e.sh) && Number.isInteger(e.sa)) {
-          await db.doc('matches/' + m.id).update({ status: 'final', sh: e.sh, sa: e.sa, goals: e.goals, settled: false });
+          await db.doc('matches/' + m.id).update({ status: 'final', sh: e.sh, sa: e.sa, goals: e.goals, played: await playedIds(API, slug, m.id.replace('espn_', '')), settled: false });
           console.log('final: ' + m.home + ' ' + e.sh + '-' + e.sa + ' ' + m.away);
         } else if (OFF.has(e.status)) {
           await db.doc('matches/' + m.id).update({ status: 'void', settled: false });

@@ -2,15 +2,27 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { judge } from '../public/markets.js';
 
-// Goal timeline [{ s: 'h'|'a', t: seconds }] from ESPN's match details, or
-// null when it can't be trusted (doesn't add up to the score).
+// Half from ESPN's display clock: "45'+2'" is still the 1st half.
+function halfOf(display) {
+  const d = String(display || ''), m = parseInt(d, 10);
+  if (!Number.isFinite(m)) return 0;
+  if (m <= 45 || d.startsWith("45'+")) return 1;
+  if (m <= 90 || d.startsWith("90'+")) return 2;
+  return 3; // extra time
+}
+
+// Goal timeline [{ s: 'h'|'a', t: seconds, h: half, p: scorer id, og }] from
+// ESPN's match details, or null when it can't be trusted (doesn't add up).
 function goalsOf(c, homeId, sh, sa) {
   const d = (c.details || []).filter((x) => x.scoringPlay);
   if (!d.length) return sh === 0 && sa === 0 ? [] : null;
   const mk = (flipOwn) => d.map((x) => {
     let s = x.team?.id === homeId ? 'h' : 'a';
     if (flipOwn && x.ownGoal) s = s === 'h' ? 'a' : 'h';
-    return { s, t: Number(x.clock?.value) || 0 };
+    const g = { s, t: Number(x.clock?.value) || 0, h: halfOf(x.clock?.displayValue), og: !!x.ownGoal };
+    const who = x.athletesInvolved?.[0]?.id;
+    if (who) g.p = String(who);
+    return g;
   });
   for (const flip of [false, true]) {
     const g = mk(flip), h = g.filter((x) => x.s === 'h').length;
@@ -29,6 +41,7 @@ export function parse(league, ev) {
   return {
     id: 'espn_' + ev.id, league, ko: Date.parse(c.date || ev.date), status: st.type?.name, state: st.type?.state, neutral: !!c.neutralSite,
     home: home.team.displayName, away: away.team.displayName, sh, sa,
+    hid: String(home.team.id || ''), aid: String(away.team.id || ''), hl: home.team.logo || '', al: away.team.logo || '',
     clock: Number(st.clock) || 0, shown: st.displayClock || '', period: st.period || 0,
     goals: Number.isInteger(sh) && Number.isInteger(sa) ? goalsOf(c, home.team.id, sh, sa) : null,
     o: bookOdds(c),
@@ -49,6 +62,17 @@ function bookOdds(c) {
   const pick = (side, fallback) => dec(ml[side]?.close?.odds ?? ml[side]?.open?.odds ?? fallback);
   const r = { h: pick('home', o.homeTeamOdds?.moneyLine), d: pick('draw', o.drawOdds?.moneyLine), a: pick('away', o.awayTeamOdds?.moneyLine) };
   return r.h && r.d && r.a ? r : null;
+}
+
+// Ids of players who started or came on, from the match summary; null if unknown.
+export async function playedIds(api, slug, eventId) {
+  try {
+    const res = await fetch(api + '/' + slug + '/summary?event=' + eventId, { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' } });
+    if (!res.ok) return null;
+    const ids = [];
+    ((await res.json()).rosters || []).forEach((t) => (t.roster || []).forEach((x) => { if (x.starter || x.subbedIn) ids.push(String(x.athlete?.id)); }));
+    return ids.length ? ids : null;
+  } catch (e) { return null; }
 }
 
 const legsOf = (b) => b.legs || [{ m: b.matchId, k: b.key, o: b.odds, label: b.label, fx: b.fixture }];

@@ -125,8 +125,17 @@ export function markets(home, away) {
   return L;
 }
 
-export function selLabel(home, away, k) {
+export function selLabel(home, away, k, pl) {
   if (k.startsWith('lv:')) return liveLabel(home, away, k);
+  if (k.startsWith('sc:') || k.startsWith('fg:')) {
+    const n = (pl && pl[k.slice(3)] && pl[k.slice(3)].n) || 'Player';
+    return k.startsWith('sc:') ? n + ' to score' : n + ' to score first';
+  }
+  if (TIMELINE.has(k.split(':')[0])) {
+    let out = k;
+    halfMarkets(home, away).forEach((g) => g.sels.forEach((s) => { if (s[0] === k) out = s[2]; }));
+    return out;
+  }
   if (k === '1x2:h') return home;
   if (k === '1x2:a') return away;
   if (k === '1x2:d') return 'Draw';
@@ -182,7 +191,7 @@ export function judge(legs, matches) {
     const m = matches[l.m];
     if (!m || m.status === 'scheduled') return 'open';
     if (m.status === 'void') return 'void';
-    return l.k.startsWith('lv:') ? liveOutcome(l, m) : outcome(l.k, m.sh, m.sa);
+    return l.k.startsWith('lv:') ? liveOutcome(l, m) : matchOutcome(l.k, m);
   });
   if (new Set(legs.map((l) => l.m)).size !== legs.length) return { status: 'void', res, odds: 1 };
   if (res.includes('lost')) return { status: 'lost', res, odds: 0 };
@@ -263,4 +272,107 @@ export function liveOutcome(l, m) {
     return (next ? next.s : 'n') === k[2] ? 'won' : 'lost';
   }
   return outcome(k.slice(1).join(':'), m.sh, m.sa);
+}
+
+/* ---------- halves and goalscorers ---------- */
+// These need the goal timeline to settle: m.goals = [{ s: 'h'|'a', t, h: half, p: playerId, og }].
+const H1 = 0.45; // share of goals scored in the first half
+
+export function halfMarkets(home, away) {
+  const R = [['h', '1', home], ['d', 'X', 'Draw'], ['a', '2', away]];
+  return [
+    { name: 'Half-time result', sels: R.map(([k, s, l]) => ['ht:' + k, s, l + ' at half-time']) },
+    { name: 'Half-time / full-time', sels: R.flatMap(([a, sa, la]) => R.map(([b, sb, lb]) => ['htft:' + a + b, sa + '/' + sb, la + ' at half-time, ' + lb + ' at full-time'])) },
+    { name: '1st half goals', sels: [0.5, 1.5].flatMap((n) => [['h1ou:' + n + ':o', 'Over ' + n, '1st half over ' + n + ' goals'], ['h1ou:' + n + ':u', 'Under ' + n, '1st half under ' + n + ' goals']]) },
+    { name: '2nd half goals', sels: [0.5, 1.5].flatMap((n) => [['h2ou:' + n + ':o', 'Over ' + n, '2nd half over ' + n + ' goals'], ['h2ou:' + n + ':u', 'Under ' + n, '2nd half under ' + n + ' goals']]) },
+    { name: 'Highest scoring half', sels: [['hsh:1', '1st', 'More goals in the 1st half'], ['hsh:2', '2nd', 'More goals in the 2nd half'], ['hsh:e', 'Equal', 'Same number of goals in both halves']] },
+  ];
+}
+
+// Result of a half/scorer key from the halves' scores and the timeline.
+function timelineOutcome(k, m) {
+  const goals = m.goals;
+  const p = k.split(':');
+  if (p[0] === 'sc' || p[0] === 'fg') {
+    if (!goals) return 'void';
+    const real = goals.filter((g) => !g.og).sort((x, y) => x.t - y.t);
+    const hit = p[0] === 'sc' ? real.some((g) => g.p === p[1]) : !!(real[0] && real[0].p === p[1]);
+    if (hit) return 'won';
+    if (m.played && !m.played.includes(p[1])) return 'void'; // didn't play: refund
+    return 'lost';
+  }
+  if (!goals || goals.some((g) => !g.h)) return 'void';
+  const c = (half, s) => goals.filter((g) => g.h === half && g.s === s).length;
+  const h1 = c(1, 'h'), a1 = c(1, 'a'), h2 = c(2, 'h'), a2 = c(2, 'a');
+  const r = (x, y) => (x > y ? 'h' : x < y ? 'a' : 'd');
+  let w;
+  switch (p[0]) {
+    case 'ht': w = r(h1, a1) === p[1]; break;
+    case 'htft': w = r(h1, a1) + r(m.sh, m.sa) === p[1]; break;
+    case 'h1ou': w = p[2] === 'o' ? h1 + a1 > +p[1] : h1 + a1 < +p[1]; break;
+    case 'h2ou': w = p[2] === 'o' ? h2 + a2 > +p[1] : h2 + a2 < +p[1]; break;
+    case 'hsh': w = (h1 + a1 > h2 + a2 ? '1' : h1 + a1 < h2 + a2 ? '2' : 'e') === p[1]; break;
+    default: return 'void';
+  }
+  return w ? 'won' : 'lost';
+}
+
+const TIMELINE = new Set(['ht', 'htft', 'h1ou', 'h2ou', 'hsh', 'sc', 'fg']);
+// Any pre-match key, settled against a finished match.
+export function matchOutcome(k, m) {
+  return TIMELINE.has(k.split(':')[0]) ? timelineOutcome(k, m) : outcome(k, m.sh, m.sa);
+}
+
+export function halfPrices(o) {
+  const { lh, la } = fitGrid(o);
+  const g1 = grid(lh * H1, la * H1), g2 = grid(lh * (1 - H1), la * (1 - H1));
+  const acc = {};
+  const add = (k, p) => { acc[k] = (acc[k] || 0) + p; };
+  const r = (x, y) => (x > y ? 'h' : x < y ? 'a' : 'd');
+  for (const [i, j, p1] of g1) {
+    if (p1 < 1e-7) continue;
+    add('ht:' + r(i, j), p1);
+    [0.5, 1.5].forEach((n) => add('h1ou:' + n + ':' + (i + j > n ? 'o' : 'u'), p1));
+    for (const [k, l, p2] of g2) {
+      const p = p1 * p2;
+      if (p < 1e-9) continue;
+      add('htft:' + r(i, j) + r(i + k, j + l), p);
+      add('hsh:' + (i + j > k + l ? '1' : i + j < k + l ? '2' : 'e'), p);
+    }
+  }
+  for (const [k, l, p2] of g2) [0.5, 1.5].forEach((n) => add('h2ou:' + n + ':' + (k + l > n ? 'o' : 'u'), p2));
+  const out = {};
+  for (const [k, p] of Object.entries(acc)) if (p > 0.004) out[k] = Math.min(101, Math.max(1.01, Math.round(((k.startsWith('htft') ? 0.9 : MARGIN) * 100) / p) / 100));
+  return out;
+}
+
+// Goalscorer prices from season stats. squads: { h: [...], a: [...] } with
+// { id, n, pos: 'G'|'D'|'M'|'F', apps, goals, inj }. Returns { p, pl }.
+const PRIOR = { F: 0.38, M: 0.13, D: 0.045, G: 0 };
+export function scorerPrices(o, squads, perTeam = 8) {
+  const { lh, la } = fitGrid(o);
+  const p = {}, pl = {};
+  const tot = lh + la, anyGoal = 1 - Math.exp(-tot);
+  for (const [side, lam] of [['h', lh], ['a', la]]) {
+    const sq = (squads[side] || []).filter((x) => x.pos !== 'G' && !x.inj);
+    if (!sq.length) continue;
+    const games = Math.max(1, ...sq.map((x) => x.apps || 0));
+    const w = sq.map((x) => {
+      const rate = ((x.goals || 0) + (PRIOR[x.pos] ?? 0.1) * 4) / ((x.apps || 0) + 4);
+      const play = Math.min(1, ((x.apps || 0) + 0.5) / (games + 1));
+      return { x, w: rate * play, play };
+    });
+    const sum = w.reduce((s, y) => s + y.w, 0);
+    if (!sum) continue;
+    w.filter((y) => y.play >= 0.3).sort((a, b) => b.w - a.w).slice(0, perTeam).forEach(({ x, w: wi }) => {
+      const xg = (lam * wi) / sum;
+      const any = 1 - Math.exp(-xg), first = (xg / tot) * anyGoal;
+      const odd = (q) => Math.min(101, Math.max(1.05, Math.round((0.88 * 100) / q) / 100));
+      if (any < 0.01) return;
+      p['sc:' + x.id] = odd(any);
+      if (first >= 0.01) p['fg:' + x.id] = odd(first);
+      pl[x.id] = { n: x.n, s: side };
+    });
+  }
+  return { p, pl };
 }

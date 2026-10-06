@@ -3,7 +3,9 @@ import { test, before, beforeEach, after } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import { doc, setDoc, updateDoc, writeBatch, collection, serverTimestamp, Timestamp, getDoc } from 'firebase/firestore';
-import { priceMap } from '../public/markets.js';
+import { priceMap as basePrices, halfPrices, scorerPrices } from '../public/markets.js';
+const SQ = { h: Array.from({ length: 12 }, (_, i) => ({ id: 'h' + i, n: 'H' + i, pos: 'FMD'[i % 3], apps: 5, goals: i % 3 })), a: Array.from({ length: 12 }, (_, i) => ({ id: 'a' + i, n: 'A' + i, pos: 'FMD'[i % 3], apps: 5, goals: i % 2 })) };
+const priceMap = (h, a, o) => ({ ...basePrices(h, a, o), ...halfPrices(o), ...scorerPrices(o, SQ).p });
 
 const DAY = Math.floor((Date.now() + 4 * 3600e3) / 864e5);
 let env;
@@ -74,7 +76,8 @@ test('valid bets go through: singles, extra markets, multi-bets', async () => {
   await assertSucceeds(bet(as('alice'), 'alice', 100, { stake: 10 }));
   await assertSucceeds(bet(as('alice'), 'alice', 90, { legs: [['m1', 'cs:2-1']], stake: 20 }));
   await assertSucceeds(bet(as('alice'), 'alice', 70, { legs: [['m1', '1x2:h'], ['m3', 'btts:y'], ['m4', 'ou:2.5:o']], stake: 30 }));
-  await assertSucceeds(bet(as('alice'), 'alice', 40, { legs: [3, 4, 5, 6, 7, 8].map((i) => ['m' + i, '1x2:d']), stake: 40 }));
+  await assertSucceeds(bet(as('alice'), 'alice', 40, { legs: [3, 4, 5, 6, 7, 8].map((i) => ['m' + i, '1x2:d']), stake: 10 }));
+  await assertSucceeds(bet(as('alice'), 'alice', 30, { legs: [['m3', 'sc:h0'], ['m4', 'htft:hh'], ['m5', 'fg:a0'], ['m6', 'hsh:2'], ['m7', 'ht:d'], ['m8', 'h2ou:0.5:o']], stake: 10 }));
 });
 
 test('bad bets are rejected', async () => {
@@ -143,4 +146,14 @@ test('bad live bets are rejected', async () => {
   await assertFails(liveBet(db));                                // stale live data
   await seedLive({ done: true });
   await assertFails(liveBet(db));                                // match over
+});
+
+test('favourite teams: up to 5 names, and the language', async () => {
+  const db = as('alice');
+  await assertSucceeds(updateDoc(doc(db, 'players/alice'), { favs: ['Galatasaray', 'Arsenal', 'Qarabağ', 'Real Madrid', 'Azerbaijan'] }));
+  await assertFails(updateDoc(doc(db, 'players/alice'), { favs: ['a', 'b', 'c', 'd', 'e', 'f'] }));
+  await assertFails(updateDoc(doc(db, 'players/alice'), { favs: [42] }));
+  await assertFails(updateDoc(doc(db, 'players/alice'), { favs: ['Arsenal'], coins: 1000 }));
+  await assertSucceeds(updateDoc(doc(db, 'players/alice'), { lang: 'az' }));
+  await assertFails(updateDoc(doc(db, 'players/alice'), { lang: 'xx' }));
 });

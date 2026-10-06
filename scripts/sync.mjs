@@ -11,8 +11,8 @@
 
 import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import { priceMap, eloOdds } from '../public/markets.js';
-import { parse, settle } from './lib.mjs';
+import { priceMap, eloOdds, halfPrices, scorerPrices } from '../public/markets.js';
+import { parse, settle, playedIds } from './lib.mjs';
 import { LEAGUES, BY_SLUG } from '../public/leagues.js';
 
 const env = process.env;
@@ -74,7 +74,34 @@ async function modelOdds(e) {
 
 /* ---------- ESPN ---------- */
 
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Goalscorer markets for club competitions; squads cached a day in teams/.
+const PLAYER_GROUPS = new Set(['Top leagues', 'European cups', 'More Europe', 'Domestic cups']);
+const squadCache = {};
+async function squad(slug, teamId) {
+  if (!teamId) return null;
+  const key = slug + ':' + teamId;
+  if (key in squadCache) return squadCache[key];
+  const ref = db.doc('teams/' + key), snap = await ref.get();
+  if (snap.exists && Date.now() - snap.data().at < 20 * 3600e3) return (squadCache[key] = snap.data().squad);
+  try {
+    const r = await get(API + '/' + slug + '/teams/' + teamId + '/roster');
+    const sq = (r.athletes || []).map((x) => {
+      const st = {};
+      (x.statistics?.splits?.categories || []).forEach((c) => c.stats.forEach((t) => { st[t.name] = t.value; }));
+      return { id: String(x.id), n: x.displayName, pos: x.position?.abbreviation || 'M', apps: st.appearances || 0, goals: st.totalGoals || 0, inj: !!(x.injuries && x.injuries.length) };
+    });
+    await ref.set({ at: Date.now(), squad: sq });
+    return (squadCache[key] = sq);
+  } catch (e) {
+    console.error('roster ' + key + ': ' + e.message);
+    return (squadCache[key] = snap.exists ? snap.data().squad : null);
+  }
+}
+
+// Order-independent deep equality (Firestore may return map keys in any order).
+const canon = (v) => (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Timestamp)
+  ? Object.keys(v).sort().map((k) => [k, canon(v[k])]) : Array.isArray(v) ? v.map(canon) : v);
+const same = (a, b) => JSON.stringify(canon(a ?? null)) === JSON.stringify(canon(b ?? null));
 
 async function syncLeague(slug, stored) {
   const L = BY_SLUG[slug] || { slug, name: slug, nat: false };
@@ -105,9 +132,14 @@ async function syncLeague(slug, stored) {
     if (!o && L.nat) { o = await modelOdds(e); src = 'elo'; }
     if (!o) continue;
     fixtures++;
-    const doc = { sk: slug, lg: L.name, home: e.home, away: e.away, ko: Timestamp.fromMillis(e.ko), status: 'scheduled', o, src };
-    if (m && m.ko.toMillis() === e.ko && same(m.o, o) && m.home === e.home && m.away === e.away && m.lg === L.name && m.src === src) continue;
-    batch.set(db.doc('matches/' + e.id), { ...doc, p: priceMap(e.home, e.away, o), updated: FieldValue.serverTimestamp() });
+    let p = { ...priceMap(e.home, e.away, o), ...halfPrices(o) }, pl = {};
+    if (PLAYER_GROUPS.has(L.group)) {
+      const [hs, as] = await Promise.all([squad(slug, e.hid), squad(slug, e.aid)]);
+      if (hs || as) { const sp = scorerPrices(o, { h: hs || [], a: as || [] }); p = { ...p, ...sp.p }; pl = sp.pl; }
+    }
+    const doc = { sk: slug, lg: L.name, home: e.home, away: e.away, hid: e.hid, aid: e.aid, hl: e.hl, al: e.al, ko: Timestamp.fromMillis(e.ko), status: 'scheduled', o, src, p, pl };
+    if (m && m.ko.toMillis() === e.ko && ['home', 'away', 'lg', 'src', 'hl', 'al', 'o', 'p', 'pl'].every((k) => same(m[k], doc[k]))) continue;
+    batch.set(db.doc('matches/' + e.id), { ...doc, updated: FieldValue.serverTimestamp() });
     written++;
   }
   await batch.commit();
@@ -116,7 +148,7 @@ async function syncLeague(slug, stored) {
   for (const m of pending) {
     const e = events.get(m.id);
     if (e && DONE.has(e.status) && Number.isInteger(e.sh) && Number.isInteger(e.sa)) {
-      await db.doc('matches/' + m.id).update({ status: 'final', sh: e.sh, sa: e.sa, goals: e.goals, settled: false });
+      await db.doc('matches/' + m.id).update({ status: 'final', sh: e.sh, sa: e.sa, goals: e.goals, played: await playedIds(API, slug, m.id.replace('espn_', '')), settled: false });
       console.log('final: ' + m.home + ' ' + e.sh + '-' + e.sa + ' ' + m.away);
     } else if ((e && OFF.has(e.status)) || now - m.ko.toMillis() > VOID_AFTER_MS) {
       await db.doc('matches/' + m.id).update({ status: 'void', settled: false });

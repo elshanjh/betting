@@ -16,7 +16,7 @@ const ev = (state, status, clock, period, sh, sa, goals) => ({
   competitions: [{
     status: { clock, displayClock: Math.floor(clock / 60) + "'", period, type: { name: status, state } },
     competitors: [{ homeAway: 'home', score: String(sh), team: { id: '1', displayName: 'Arsenal' } }, { homeAway: 'away', score: String(sa), team: { id: '2', displayName: 'Chelsea' } }],
-    details: goals.map(([team, t]) => ({ scoringPlay: true, team: { id: team }, clock: { value: t } })),
+    details: goals.map(([team, t]) => ({ scoringPlay: true, team: { id: team }, clock: { value: t, displayValue: Math.floor(t / 60) + 1 + "'" }, athletesInvolved: [{ id: team === '1' ? '77' : '88' }] })),
   }],
 });
 
@@ -45,7 +45,7 @@ test('publishes live score and prices, then settles at full time', async () => {
   event = ev('post', 'STATUS_FULL_TIME', 5400, 2, 1, 1, [['1', 900], ['2', 3000]]);
   await live();
   const m = (await db.doc('matches/espn_50').get()).data();
-  assert.equal(m.status, 'final'); assert.deepEqual(m.goals, [{ s: 'h', t: 900 }, { s: 'a', t: 3000 }]);
+  assert.equal(m.status, 'final'); assert.deepEqual(m.goals, [{ s: 'h', t: 900, h: 1, og: false, p: '77' }, { s: 'a', t: 3000, h: 2, og: false, p: '88' }]);
   assert.equal((await db.doc('live/espn_50').get()).data().done, true);
   assert.equal((await db.doc('bets/lb1').get()).data().status, 'won');
   assert.equal((await db.doc('bets/lb2').get()).data().status, 'lost');

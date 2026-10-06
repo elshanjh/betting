@@ -43,7 +43,7 @@ service cloud.firestore {
         && request.resource.data.joined == request.time;
 
       allow update: if signedIn() && request.auth.uid == uid
-        && (isClaim() || isBet() || isRename());
+        && (isClaim() || isBet() || isRename() || isFavs() || isLang());
 
       allow delete: if false;
 
@@ -72,6 +72,17 @@ service cloud.firestore {
           && bet.uid == uid
           && request.resource.data.coins == resource.data.coins - bet.stake
           && request.resource.data.coins >= 0;
+      }
+
+      // Up to 5 favourite teams (names), and the UI language.
+      function isFavs() {
+        let f = request.resource.data.favs;
+        return changed().hasOnly(['favs']) && f is list && f.size() <= 5
+          && fav(f, 0) && fav(f, 1) && fav(f, 2) && fav(f, 3) && fav(f, 4);
+      }
+      function fav(f, i) { return f.size() <= i || (f[i] is string && f[i].size() >= 1 && f[i].size() <= 60); }
+      function isLang() {
+        return changed().hasOnly(['lang']) && request.resource.data.lang in ['en', 'az'];
       }
 
       function isRename() {

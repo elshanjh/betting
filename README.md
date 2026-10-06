@@ -126,6 +126,25 @@ ESPN's feed and eloratings.net are free and need no key, but neither is an
 official API, so they could change. If that happens the sync job fails
 loudly in the Actions tab, and only `scripts/sync.mjs` needs updating.
 
+## Markets, languages, favourites
+
+- **Per match** (tap `+N` on a row): Main (double chance, draw no bet, total
+  goals, both teams to score), **Players** (anytime and first goalscorer),
+  Goals, **Halves** (half-time result, half-time/full-time, goals per half,
+  highest scoring half) and Score (correct score, winning margin, handicaps).
+- **Goalscorer prices** come from each squad's season stats on ESPN (goals,
+  appearances, position, injuries), cached a day in `teams/`, shared out of the
+  team's expected goals. A player who doesn't play is refunded. Club
+  competitions only.
+- Half and goalscorer markets settle from the goal timeline ESPN publishes;
+  if that timeline doesn't add up, those picks are refunded.
+- **English / Azerbaijani**: the EN/AZ switch in the top bar. Strings live in
+  `public/i18n.js` (keyed by the English text), including the roasts.
+- **Favourite teams**: up to 5, from the account menu or the stars in a
+  match's markets. Their matches show first in Sports and Live, and the
+  league picker gets a "Your teams" option.
+- Team logos and national flags come from ESPN.
+
 ## Live betting
 
 The **Live** tab lists matches being played right now (top leagues, European
