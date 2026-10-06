@@ -29,49 +29,36 @@ test/              rule tests + sync tests (npm test)
 
 ## Setup (about 20 minutes)
 
-### 1. Firebase project
+### 1. Firebase project (in the browser)
 
 1. Go to <https://console.firebase.google.com>, **Create a project**. You can
    turn Google Analytics off.
 2. **Build > Authentication > Get started > Sign-in method > Google > Enable.**
 3. **Build > Firestore Database > Create database.** Pick a location near you
    (for example `eur3` for Europe) and start in **production mode**.
-4. **Project settings (gear icon) > General > Your apps > Web (`</>`)**.
-   Register the app (name it anything, no need to tick Hosting here) and copy
-   the `firebaseConfig` values into `public/config.js`.
 
-### 2. Deploy the app
-
-You need Node.js 20+ on your computer.
-
-```bash
-git clone https://github.com/elshanjh/betting && cd betting
-npm install
-npx firebase login
-```
-
-Put your project ID in `.firebaserc` (replace `PASTE_YOUR_PROJECT_ID`), then:
-
-```bash
-npm run deploy
-```
-
-This uploads the app, the security rules and the database index. The app is
-now live at `https://<your-project-id>.web.app`.
-
-### 3. Real odds and results
-
-Odds and scores come from ESPN's public scoreboard feed, so there is no API
-key to get. The sync job only needs permission to write to your database:
+### 2. Connect GitHub to Firebase
 
 1. In Firebase: **Project settings > Service accounts > Generate new private
    key**. A JSON file downloads. **Never commit this file**; it can do
-   anything to your database.
+   anything to your project.
 2. In GitHub: **repo Settings > Secrets and variables > Actions > New
    repository secret**, name it `FIREBASE_SERVICE_ACCOUNT` and paste the whole
    content of the JSON file.
-3. **Actions tab > Sync odds and results > Run workflow** to load fixtures
-   right away. After that it runs by itself every hour.
+
+### 3. Deploy and load matches (in GitHub, no computer needed)
+
+1. **Actions tab > Deploy > Run workflow.** It fills in the web config,
+   uploads the app, the security rules and the database index, and prints the
+   link: `https://<your-project-id>.web.app`. After this, every push to `main`
+   deploys by itself.
+2. **Actions tab > Sync odds and results > Run workflow** to load fixtures
+   right away. After that it runs by itself every hour. Odds and scores come
+   from ESPN's public feed, so there is no API key to get.
+
+If Deploy fails with a permission error, open
+<https://console.cloud.google.com/iam-admin/iam>, select your project, edit
+the `firebase-adminsdk-…` service account and add the role **Firebase Admin**.
 
 ### 4. Invite your friends
 
@@ -97,7 +84,7 @@ their coins. To install it like an app:
   knockout ties settle on the score after extra time.
 - **Daily coins** reset at midnight UTC+4. To use another time zone change
   `DAY_OFFSET_HOURS` in `public/config.js` **and** `DAY_OFFSET_MS` in
-  `firestore.rules`, then `npm run deploy`.
+  `firestore.rules`, then push to `main` (it deploys by itself).
 
 ### Anti-cheat
 

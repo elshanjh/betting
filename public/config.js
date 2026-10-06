@@ -1,6 +1,6 @@
-// 1. Paste your Firebase web config here (Firebase console > Project settings >
-//    Your apps > Web app > SDK setup and configuration > Config).
-//    These values are not secret; the security rules protect the data.
+// 1. Firebase web config. Leave the placeholders: the Deploy workflow fills
+//    them in from your project. (Or paste it yourself from Firebase console >
+//    Project settings > Your apps.) Not secret; the security rules protect the data.
 export const firebaseConfig = {
   apiKey: 'PASTE_ME',
   authDomain: 'PASTE_ME.firebaseapp.com',
