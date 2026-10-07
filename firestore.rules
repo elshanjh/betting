@@ -9,12 +9,13 @@ service cloud.firestore {
 
     function signedIn() { return request.auth != null; }
 
-    // Day number for the daily claim. DAY_OFFSET_MS must match
-    // DAY_OFFSET_HOURS in public/config.js (4 hours = 14400000).
-    function today() {
-      let DAY_OFFSET_MS = 14400000;
-      return math.floor((request.time.toMillis() + DAY_OFFSET_MS) / 86400000);
-    }
+    // Day number for the daily claim at a UTC offset in minutes, so the
+    // claim resets at 00:00 on each player's own clock. Players who joined
+    // before time zones were stored count as UTC+4 (240), matching
+    // DAY_OFFSET_HOURS in public/config.js.
+    function dayAt(tz) { return math.floor((request.time.toMillis() + tz * 60000) / 86400000); }
+    function tzOf(d) { return d.get('tz', 240); }
+    function validTz(tz) { return tz is int && tz >= -720 && tz <= 840; }
 
     function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
     function playerPath(uid) { return /databases/$(database)/documents/players/$(uid); }
@@ -34,7 +35,8 @@ service cloud.firestore {
       allow read: if signedIn();
 
       allow create: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['name', 'coins', 'lastClaimDay', 'won', 'lost', 'joined'])
+        && request.resource.data.keys().hasOnly(['name', 'coins', 'lastClaimDay', 'won', 'lost', 'joined', 'tz'])
+        && validTz(request.resource.data.get('tz', 240))
         && validName(request.resource.data.name)
         && request.resource.data.coins == 0
         && request.resource.data.lastClaimDay == 0
@@ -43,7 +45,7 @@ service cloud.firestore {
         && request.resource.data.joined == request.time;
 
       allow update: if signedIn() && request.auth.uid == uid
-        && (isClaim() || isBet() || isRename() || isFavs() || isLang());
+        && (isClaim() || isBet() || isRename() || isFavs() || isLang() || isTz());
 
       allow delete: if false;
 
@@ -51,8 +53,8 @@ service cloud.firestore {
 
       function isClaim() {
         return changed().hasOnly(['coins', 'lastClaimDay'])
-          && resource.data.lastClaimDay < today()
-          && request.resource.data.lastClaimDay == today()
+          && resource.data.lastClaimDay < dayAt(tzOf(resource.data))
+          && request.resource.data.lastClaimDay == dayAt(tzOf(resource.data))
           && request.resource.data.coins == resource.data.coins + 100;
       }
 
@@ -72,6 +74,16 @@ service cloud.firestore {
           && bet.uid == uid
           && request.resource.data.coins == resource.data.coins - bet.stake
           && request.resource.data.coins >= 0;
+      }
+
+      // Moving time zone (travel, daylight saving) can't buy an extra claim:
+      // if today's coins were already claimed, they stay claimed for
+      // "today" in the new zone too.
+      function isTz() {
+        let old = resource.data;
+        let tz = request.resource.data.tz;
+        return changed().hasOnly(['tz', 'lastClaimDay']) && changed().hasAll(['tz']) && validTz(tz)
+          && request.resource.data.lastClaimDay == (old.lastClaimDay >= dayAt(tzOf(old)) ? dayAt(tz) : old.lastClaimDay);
       }
 
       // Up to 5 favourite teams (names), and the UI language.

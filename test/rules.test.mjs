@@ -157,3 +157,36 @@ test('favourite teams: up to 5 names, and the language', async () => {
   await assertSucceeds(updateDoc(doc(db, 'players/alice'), { lang: 'az' }));
   await assertFails(updateDoc(doc(db, 'players/alice'), { lang: 'xx' }));
 });
+
+test('daily claim resets at 00:00 in the player\'s own time zone', async () => {
+  const now = Date.now();
+  const day = (tz) => Math.floor((now + tz * 60000) / 864e5);
+  // Tallinn-ish (UTC+3) and New York-ish (UTC-4) players, both unclaimed today.
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'players/tal'), { name: 'T', coins: 0, lastClaimDay: day(180) - 1, won: 0, lost: 0, tz: 180 });
+    await setDoc(doc(ctx.firestore(), 'players/ny'), { name: 'N', coins: 0, lastClaimDay: day(-240) - 1, won: 0, lost: 0, tz: -240 });
+  });
+  await assertFails(updateDoc(doc(as('tal'), 'players/tal'), { coins: 100, lastClaimDay: day(240) === day(180) ? day(180) + 1 : day(240) })); // someone else's "today"
+  await assertSucceeds(updateDoc(doc(as('tal'), 'players/tal'), { coins: 100, lastClaimDay: day(180) }));
+  await assertFails(updateDoc(doc(as('tal'), 'players/tal'), { coins: 200, lastClaimDay: day(180) }));
+  await assertSucceeds(updateDoc(doc(as('ny'), 'players/ny'), { coins: 100, lastClaimDay: day(-240) }));
+});
+
+test('changing time zone never buys a second claim', async () => {
+  const now = Date.now();
+  const day = (tz) => Math.floor((now + tz * 60000) / 864e5);
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'players/tr'), { name: 'X', coins: 100, lastClaimDay: day(-720), won: 0, lost: 0, tz: -720 }));
+  const db = as('tr');
+  // Claimed today at UTC-12; jump to UTC+14 without carrying the claim over: denied.
+  await assertFails(updateDoc(doc(db, 'players/tr'), { tz: 840 }));
+  // Carrying it over is the only allowed move, and then there's nothing to claim.
+  await assertSucceeds(updateDoc(doc(db, 'players/tr'), { tz: 840, lastClaimDay: day(840) }));
+  await assertFails(updateDoc(doc(db, 'players/tr'), { coins: 200, lastClaimDay: day(840) }));
+  await assertFails(updateDoc(doc(db, 'players/tr'), { tz: 5000 }));
+});
+
+test('new players store their time zone', async () => {
+  const fields = { name: 'Z', coins: 0, lastClaimDay: 0, won: 0, lost: 0, joined: serverTimestamp() };
+  await assertSucceeds(setDoc(doc(as('z1'), 'players/z1'), { ...fields, tz: 180 }));
+  await assertFails(setDoc(doc(as('z2'), 'players/z2'), { ...fields, tz: 'Europe/Tallinn' }));
+});

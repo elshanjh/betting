@@ -35,9 +35,26 @@ function fmtWhen(x) { const d = new Date(ms(x) || Date.now()); return (getLang()
 function ms(x) { return x && x.toMillis ? x.toMillis() : 0; }
 const fmtOdds = (o) => (o >= 100 ? Math.round(o) : Number(o).toFixed(2));
 // Must match today() in firestore.rules.
-const DAY_MS = 86400000, OFFSET_MS = DAY_OFFSET_HOURS * 3600000;
-function claimDay(now = Date.now()) { return Math.floor((now + OFFSET_MS) / DAY_MS); }
-function nextClaimAt() { return (claimDay() + 1) * DAY_MS - OFFSET_MS; }
+// The daily claim resets at 00:00 on the player's own clock. The player doc
+// stores their UTC offset in minutes (tz); older players default to DAY_OFFSET_HOURS.
+const DAY_MS = 86400000;
+const deviceTz = () => -new Date().getTimezoneOffset();
+const tzOfMe = () => (S.me && Number.isInteger(S.me.tz) ? S.me.tz : DAY_OFFSET_HOURS * 60);
+function dayAt(tz, now = Date.now()) { return Math.floor((now + tz * 60000) / DAY_MS); }
+function claimDay(now = Date.now()) { return dayAt(tzOfMe(), now); }
+function nextClaimAt() { return (claimDay() + 1) * DAY_MS - tzOfMe() * 60000; }
+// Keep the stored offset in line with the phone (travel, summer time).
+let tzSyncing = false;
+async function syncTz() {
+  const tz = deviceTz();
+  if (!S.me || tzSyncing || S.me.tz === tz || tz < -720 || tz > 840) return;
+  tzSyncing = true;
+  const old = S.me.lastClaimDay || 0;
+  const lastClaimDay = old >= claimDay() ? dayAt(tz) : old;
+  try { await updateDoc(doc(db, 'players', S.user.uid), lastClaimDay === old ? { tz } : { tz, lastClaimDay }); }
+  catch (e) { console.error(e); }
+  tzSyncing = false;
+}
 function matchMap() { const o = {}; S.matches.forEach((m) => { o[m.id] = m; }); return o; }
 const legsOf = (b) => b.legs || [{ m: b.matchId, k: b.key, o: b.odds, label: b.label, fx: b.fixture }];
 const isOpen = (m, now = Date.now()) => m && m.status === 'scheduled' && ms(m.ko) > now;
@@ -127,7 +144,7 @@ async function join(name) {
   name = name.trim().slice(0, 20);
   if (!name) { toast(t('Pick a name first.')); return; }
   try {
-    await setDoc(doc(db, 'players', S.user.uid), { name, coins: 0, lastClaimDay: 0, won: 0, lost: 0, joined: serverTimestamp() });
+    await setDoc(doc(db, 'players', S.user.uid), { name, coins: 0, lastClaimDay: 0, won: 0, lost: 0, joined: serverTimestamp(), tz: deviceTz() });
     toast(t('You are in. Claim your first {n} coins.', { n: DAILY_COINS }));
   } catch (e) { failed(e); }
 }
@@ -290,6 +307,7 @@ function listen() {
     if (mine || !snap.metadata.fromCache) S.meLoaded = true;
     const first = !S.me && mine;
     S.me = mine;
+    if (mine) syncTz();
     if (first && mine.lang && mine.lang !== getLang() && !load('fs_lang', null)) applyLang(mine.lang);
     renderAll();
   }, (e) => { console.error(e); S.meLoaded = true; renderAll(); }));

@@ -87,9 +87,10 @@ their coins. To install it like an app:
   bet refunds on a draw. A match with no result 60 hours after kickoff
   and any postponed or abandoned match are refunded. Champions League
   knockout ties settle on the score after extra time.
-- **Daily coins** reset at midnight UTC+4. To use another time zone change
-  `DAY_OFFSET_HOURS` in `public/config.js` **and** `DAY_OFFSET_MS` in
-  `firestore.rules`, then push to `main` (it deploys by itself).
+- **Daily coins** reset at 00:00 on each player's own phone clock. The app
+  stores the player's UTC offset and keeps it up to date (travel, summer
+  time); the rules make sure a time zone change never allows a second claim
+  on the same day. Players who joined before this default to UTC+4.
 
 ### Anti-cheat
 

@@ -14,7 +14,7 @@ export const firebaseConfig = {
 //    If you change it, change the 100 in firestore.rules too.
 export const DAILY_COINS = 100;
 
-// 3. The hour offset from UTC at which the "day" starts for the daily claim.
-//    4 = the claim resets at midnight in UTC+4 (Baku, Dubai, Tbilisi).
-//    If you change it, change DAY_OFFSET_MS in firestore.rules too.
+// 3. The daily claim resets at 00:00 on each player's own phone clock. This
+//    offset (hours from UTC) is only used for players who joined before time
+//    zones were stored. If you change it, change the 240 in firestore.rules too.
 export const DAY_OFFSET_HOURS = 4;
