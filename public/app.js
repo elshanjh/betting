@@ -15,7 +15,7 @@ const S = {
   myBets: [], feed: [], openBets: [], busy: false, live: {},
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null, cat: 'main',
   slip: load('fs_slip', []), stake: 25, sheet: false, confirmOdds: 0,
-  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', favDraft: [],
+  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, teamQ: '',
 };
 let mySub = null;
 const last = {};
@@ -321,43 +321,62 @@ function listenMine() {
     const all = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
     S.myMore = all.length > S.myLimit;
     S.myBets = all.slice(0, S.myLimit);
-    renderMine(); renderMatches();
+    renderMine(); renderMatches(); renderBetView();
     if (!snap.metadata.fromCache) checkResults();
   }, (e) => console.error(e));
 }
 
-/* ---------- account and favourites ---------- */
-function allTeams() {
-  const set = new Set();
-  S.matches.forEach((m) => { set.add(m.home); set.add(m.away); });
-  return [...set].sort((a, b) => a.localeCompare(b));
+/* ---------- account page and favourites ---------- */
+// Every team in the loaded fixtures, with its logo and league.
+function teamIndex() {
+  const o = {};
+  S.matches.forEach((m) => {
+    if (!o[m.home]) o[m.home] = { n: m.home, logo: m.hl, sk: m.sk };
+    if (!o[m.away]) o[m.away] = { n: m.away, logo: m.al, sk: m.sk };
+  });
+  return o;
 }
-function renderFavDraft() {
-  $('favCount').textContent = t('{n} of 5', { n: S.favDraft.length });
-  $('favList').innerHTML = S.favDraft.length ? S.favDraft.map((f, i) => '<span class="fav-chip">⭐ ' + esc(f) + ' <button type="button" data-rmfav="' + i + '" aria-label="' + esc(t('Remove from favourites')) + '">×</button></span>').join('')
-    : '<small class="muted">' + t('No favourites yet.') + '</small>';
-}
-function addFavDraft(name) {
-  name = String(name || '').trim();
-  if (!name || S.favDraft.includes(name)) return;
-  if (S.favDraft.length >= 5) { toast(t('Max 5 favourite teams. Commitment issues?')); return; }
-  S.favDraft.push(name.slice(0, 60));
-  renderFavDraft();
-}
+const GROUP_ORDER = (sk) => { const l = BY_SLUG[sk]; return l ? GROUPS.indexOf(l.group) * 100 + LEAGUES.indexOf(l) : 9999; };
+const teamLeague = (x) => (x && BY_SLUG[x.sk] ? '<span class="team-lg">' + flagOf(x.sk) + esc(t(BY_SLUG[x.sk].name)) + '</span>' : '');
+
 function openAccount() {
   if (!S.user) return;
-  const google = S.user.providerData.some((p) => p.providerId === 'google.com');
-  $('accountWho').textContent = t('Signed in as {who}', { who: (S.user.email || S.user.displayName || '') + (google ? ' (Google)' : '') });
-  $('accountName').value = S.me ? S.me.name : '';
-  $('accountName').parentElement.hidden = !S.me;
-  $('favList').parentElement.hidden = !S.me;
-  $('accountSave').hidden = !S.me;
-  S.favDraft = favs().slice();
-  renderFavDraft();
-  $('teamList').innerHTML = allTeams().map((n) => '<option value="' + esc(n) + '">').join('');
-  $('favIn').value = '';
-  $('accountDlg').showModal();
+  if (!['account', 'bet'].includes($('app').dataset.tab)) S.prevTab = $('app').dataset.tab;
+  S.teamQ = '';
+  showTab('account');
+  renderAccount(true);
+  window.scrollTo({ top: 0 });
 }
+
+function renderAccount(full) {
+  if ($('app').dataset.tab !== 'account' || !S.user) return;
+  if (full || !$('teamQ')) {
+    const google = S.user.providerData.some((p) => p.providerId === 'google.com');
+    $('account').innerHTML = '<div class="page-h"><button class="back" data-back="1">‹ ' + t('Back') + '</button><h2>' + t('Your account') + '</h2></div>'
+      + '<div class="card"><h3>' + t('Profile') + '</h3><p class="muted">' + esc(t('Signed in as {who}', { who: (S.user.email || S.user.displayName || '') + (google ? ' (Google)' : '') })) + '</p>'
+      + (S.me ? '<form class="name-row" id="nameForm"><input type="text" id="accountName" maxlength="20" autocomplete="nickname" value="' + esc(S.me.name) + '" aria-label="' + esc(t('Name on the table')) + '"><button class="btn" type="submit">' + t('Save name') + '</button></form>' : '') + '</div>'
+      + '<div class="card"><h3>' + t('Language') + '</h3><div class="lang-big"><button data-setlang="en" aria-pressed="' + (getLang() === 'en') + '">English</button><button data-setlang="az" aria-pressed="' + (getLang() === 'az') + '">Azərbaycanca</button></div></div>'
+      + (S.me ? '<div class="card"><h3>' + t('Favourite teams') + ' <small class="muted" id="favCount"></small></h3><div class="fav-sel" id="favSel"></div>'
+        + '<input type="search" id="teamQ" placeholder="' + esc(t('Find your team')) + '" autocomplete="off" value="' + esc(S.teamQ) + '">'
+        + '<small class="muted">' + t('Tap a team to add it. Up to 5.') + '</small><div class="team-list" id="teamResults"></div></div>' : '')
+      + '<button class="btn danger logout" data-logout="1">' + t('Log out') + '</button>';
+  }
+  if (!S.me) return;
+  const idx = teamIndex(), F = favs();
+  $('favCount').textContent = t('{n} of 5', { n: F.length });
+  paint('favSel', F.length ? F.map((f) => { const x = idx[f];
+    return '<div class="fav-item">' + logo(x && x.logo, f) + '<span class="tn">' + esc(f) + '</span>' + teamLeague(x) + '<button data-team="' + esc(f) + '" aria-label="' + esc(t('Remove from favourites')) + '">×</button></div>'; }).join('')
+    : '<small class="muted">' + t('No favourites yet.') + '</small>');
+  const q = S.teamQ.trim().toLowerCase();
+  const all = Object.values(idx).filter((x) => !q || x.n.toLowerCase().includes(q))
+    .sort((a, b) => GROUP_ORDER(a.sk) - GROUP_ORDER(b.sk) || a.n.localeCompare(b.n));
+  const shown = all.slice(0, 80);
+  paint('teamResults', shown.map((x) => { const on = F.includes(x.n);
+    return '<button class="team-row" data-team="' + esc(x.n) + '" aria-pressed="' + on + '">' + logo(x.logo, x.n) + '<span class="tn">' + esc(x.n) + '</span>' + teamLeague(x) + '<span class="st">' + (on ? '★' : '☆') + '</span></button>'; }).join('')
+    + (all.length > shown.length ? '<div class="team-row muted">' + t('Showing {n} of {m}. Type to find more.', { n: shown.length, m: all.length }) + '</div>' : '')
+    + (!all.length ? '<div class="team-row muted">' + t('No upcoming match for "{q}".', { q: esc(S.teamQ) }) + '</div>' : ''));
+}
+
 async function saveFavs(list) {
   try { await updateDoc(doc(db, 'players', S.user.uid), { favs: list }); } catch (e) { failed(e); }
 }
@@ -368,20 +387,27 @@ async function toggleFav(team) {
   else { if (f.length >= 5) { toast(t('Max 5 favourite teams. Commitment issues?')); return; } f.push(team); }
   await saveFavs(f);
 }
-$('favAdd').addEventListener('click', () => { addFavDraft($('favIn').value); $('favIn').value = ''; });
-$('favIn').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFavDraft($('favIn').value); $('favIn').value = ''; } });
-$('favList').addEventListener('click', (e) => { const b = e.target.closest('[data-rmfav]'); if (b) { S.favDraft.splice(Number(b.dataset.rmfav), 1); renderFavDraft(); } });
-$('accountDlg').addEventListener('close', async () => {
-  const v = $('accountDlg').returnValue;
-  if (v === 'logout') { setSlip([]); await signOut(auth); toast(t('Logged out. Your coins will miss you. Probably.')); return; }
-  if (v === 'save' && S.me) {
-    const name = $('accountName').value.trim().slice(0, 20);
-    try {
-      if (name && name !== S.me.name) { await updateDoc(doc(db, 'players', S.user.uid), { name }); toast(t('You are "{name}" now. Same bad bets, new name.', { name })); }
-      if (JSON.stringify(S.favDraft) !== JSON.stringify(favs())) { await saveFavs(S.favDraft); if (!name || name === S.me.name) toast(t('Saved.')); }
-    } catch (e) { failed(e); }
-  }
+$('account').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.back) goBack();
+  else if (b.dataset.team) toggleFav(b.dataset.team);
+  else if (b.dataset.setlang) { applyLang(b.dataset.setlang, true); renderAccount(true); }
+  else if (b.dataset.logout) { setSlip([]); await signOut(auth); toast(t('Logged out. Your coins will miss you. Probably.')); }
 });
+$('account').addEventListener('input', (e) => { if (e.target.id === 'teamQ') { S.teamQ = e.target.value; renderAccount(); } });
+$('account').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'nameForm') return;
+  e.preventDefault();
+  const name = $('accountName').value.trim().slice(0, 20);
+  if (!name || !S.me || name === S.me.name) return;
+  try { await updateDoc(doc(db, 'players', S.user.uid), { name }); toast(t('You are "{name}" now. Same bad bets, new name.', { name })); } catch (err) { failed(err); }
+});
+
+function goBack() {
+  showTab(S.prevTab || 'matches');
+  window.scrollTo({ top: 0 });
+}
 
 /* ---------- rendering ---------- */
 function renderWallet() {
@@ -629,8 +655,17 @@ function renderSlipBar() {
   if (n) bar.innerHTML = '<span>🧾 ' + t('Bet slip') + ' <span class="badge">' + n + '</span></span><span class="num">@ ' + (st.good.length ? fmtOdds(st.odds) : '–') + ' ›</span>';
 }
 
-const ICON = { open: '⏳', won: '✅', lost: '❌', void: '↩️' };
 const WORD = { open: 'Waiting', won: 'Won', lost: 'Lost', void: 'Refunded' };
+const SVG = {
+  open: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.2l2 1.3"/></svg>',
+  won: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+  lost: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+  void: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 1 0 1.5-3.5"/><path d="M3 2.5V5h2.5"/></svg>',
+};
+// Status pill: icon + word; `icon` alone for tight spots.
+function badge(st, size) {
+  return '<span class="sb sb-' + st + (size ? ' ' + size : '') + '" title="' + esc(t(WORD[st])) + '">' + SVG[st] + (size === 'icon' ? '' : t(WORD[st])) + '</span>';
+}
 
 // Label of a placed leg in the current language when the match is known.
 function legLabel(l) {
@@ -655,26 +690,56 @@ function legState(b, l, i, mm) {
   return { st, score };
 }
 
-function betCard(b, mm) {
+// One line per bet in My bets; tap for the details page.
+function betCard(b) {
   const legs = legsOf(b), st = b.status;
   const title = legs.length > 1 ? t('{n}-pick multi', { n: legs.length }) : esc(legLabel(legs[0]));
   const right = st === 'open' ? Math.round(b.stake * b.odds) + '<small>' + t('to win') + '</small>'
     : st === 'won' ? '<span class="won-n">+' + b.payout + '</span><small>' + t('paid') + '</small>'
     : st === 'lost' ? '<span class="lost-n">−' + b.stake + '</span><small>' + t('lost') + '</small>'
     : b.stake + '<small>' + t('refunded') + '</small>';
-  let h = '<article class="bet ' + st + '"><div class="ico" title="' + t(WORD[st]) + '">' + ICON[st] + '</div>'
-    + '<div class="t">' + title + ' <span class="num">@ ' + fmtOdds(b.odds) + '</span></div>'
-    + '<div class="r num">' + right + '</div>'
-    + '<div class="s">' + t(WORD[st]) + ' · ' + t('staked {n}', { n: b.stake }) + ' · ' + esc(fmtWhen(b.placed)) + '</div>';
-  h += '<div class="legs-mini">' + legs.map((l, i) => {
-    const x = legState(b, l, i, mm);
-    return '<span class="lg ' + x.st + '">' + ICON[x.st] + ' <span>' + (legs.length > 1 ? esc(legLabel(l)) + ' @ ' + fmtOdds(l.o) + ' · ' : '') + esc(l.fx) + '</span><em>' + esc(x.score || b.score || '') + '</em></span>';
-  }).join('') + '</div>';
-  return h + '</article>';
+  return '<button class="bet-row" data-bet="' + esc(b.id) + '"><div class="t">' + title + '</div><div class="r num">' + right + '</div><span class="chev" aria-hidden="true">›</span>'
+    + '<div class="s">' + badge(st, 'sm') + '<span class="num">@ ' + fmtOdds(b.odds) + ' · ' + t('staked {n}', { n: b.stake }) + '</span></div></button>';
 }
 
+function openBet(id) {
+  if (!['account', 'bet'].includes($('app').dataset.tab)) S.prevTab = $('app').dataset.tab;
+  S.betId = id;
+  showTab('bet');
+  renderBetView();
+  window.scrollTo({ top: 0 });
+}
+
+function renderBetView() {
+  if ($('app').dataset.tab !== 'bet') return;
+  const b = S.myBets.find((x) => x.id === S.betId);
+  const head = '<div class="page-h"><button class="back" data-back="1">‹ ' + t('Back') + '</button><h2>' + t('Bet details') + '</h2></div>';
+  if (!b) { paint('betView', head + '<div class="empty">' + t('Bet not found.') + '</div>'); return; }
+  const legs = legsOf(b), st = b.status, mm = matchMap();
+  const title = legs.length > 1 ? t('{n}-pick multi', { n: legs.length }) : esc(legLabel(legs[0]));
+  const ret = st === 'open' ? Math.round(b.stake * b.odds) : st === 'won' ? '+' + b.payout : st === 'lost' ? '−' + b.stake : b.stake;
+  let h = head + '<div class="card"><div class="bd-top"><div class="bd-title">' + title + '</div>' + badge(st) + '</div>'
+    + '<div class="bd-grid"><div><small>' + t('Stake') + '</small><b class="num">' + b.stake + '</b></div>'
+    + '<div><small>' + t('Odds') + '</small><b class="num">' + fmtOdds(b.odds) + '</b></div>'
+    + '<div><small>' + t(st === 'open' ? 'Returns if it wins' : st === 'won' ? 'Paid' : st === 'lost' ? 'Lost' : 'Refunded') + '</small><b class="num ' + (st === 'won' ? 'won-n' : st === 'lost' ? 'lost-n' : '') + '">' + ret + '</b></div>'
+    + '<div><small>' + t('Placed') + '</small><b class="num" style="font-size:15px">' + esc(fmtWhen(b.placed)) + '</b></div></div>'
+    + (legs.length > 1 ? '<small class="muted">' + t("Every pick has to win. One miss and it's gone.") + '</small>' : '') + '</div>';
+  h += '<h3>' + t('Picks') + '</h3>' + legs.map((l, i) => {
+    const x = legState(b, l, i, mm), m = mm[l.m], lv = S.live[l.m];
+    const home = m ? m.home : lv ? lv.home : String(l.fx || '').split(' v ')[0], away = m ? m.away : lv ? lv.away : String(l.fx || '').split(' v ')[1] || '';
+    const hl = m ? m.hl : lv ? lv.hl : '', al = m ? m.al : lv ? lv.al : '';
+    const sk = m ? m.sk : lv ? lv.sk : null;
+    return '<div class="pick ' + x.st + '"><div class="pick-top"><div><div class="pick-sel">' + esc(legLabel(l)) + '</div></div><div class="pick-odds num">' + fmtOdds(l.o) + '</div></div>'
+      + '<div class="pick-match"><span class="tm">' + logo(hl, home) + '<span class="tn">' + esc(home) + '</span></span><span class="pick-score num">' + esc(x.score || (legs.length === 1 && b.score) || '') + '</span>'
+      + '<span class="tm">' + logo(al, away) + '<span class="tn">' + esc(away) + '</span></span></div>'
+      + '<div class="pick-meta"><span class="team-lg">' + (sk ? flagOf(sk) + esc(t(BY_SLUG[sk] ? BY_SLUG[sk].name : (m && m.lg) || '')) : '') + '</span>' + badge(x.st, 'sm') + '</div></div>';
+  }).join('');
+  paint('betView', h);
+}
+$('betView').addEventListener('click', (e) => { if (e.target.closest('[data-back]')) goBack(); });
+
 function renderMine() {
-  const bets = S.myBets, mm = matchMap();
+  const bets = S.myBets;
   const open = bets.filter((b) => b.status === 'open').length;
   const badge = $('openCount');
   badge.hidden = !open; badge.textContent = open;
@@ -697,9 +762,9 @@ function renderMine() {
       + '<div class="stat"><small>' + t('Biggest win') + '</small><b class="num">' + (best ? '+' + best : '–') + '</b></div></div>';
     if (S.mineFilter !== 'all' && !n[S.mineFilter]) S.mineFilter = 'all';
     h += '<div class="chips" id="mineFilter">' + ['all', 'open', 'won', 'lost', 'void'].filter((k) => k === 'all' || n[k]).map((k) =>
-      '<button class="chip" data-mf="' + k + '" aria-pressed="' + (S.mineFilter === k) + '">' + (k === 'all' ? t('All') : ICON[k] + ' ' + t(WORD[k])) + ' (' + n[k] + ')</button>').join('') + '</div>';
+      '<button class="chip" data-mf="' + k + '" aria-pressed="' + (S.mineFilter === k) + '">' + (k === 'all' ? t('All') : '<i class="dotk ' + k + '"></i>' + t(WORD[k])) + ' (' + n[k] + ')</button>').join('') + '</div>';
     const list = bets.filter((b) => S.mineFilter === 'all' || b.status === S.mineFilter);
-    h += '<div class="bets">' + list.map((b) => betCard(b, mm)).join('') + '</div>';
+    h += '<div class="bets">' + list.map((b) => betCard(b)).join('') + '</div>';
     if (S.myMore) h += '<button class="more-btn" data-older="1">' + t('Load older bets') + '</button>';
   }
   paint('mine', h);
@@ -719,12 +784,12 @@ function renderBoard() {
   paint('feed', S.feed.length ? '<div class="slip-list">' + S.feed.map((b) => {
     const legs = legsOf(b), what = legs.length > 1 ? t('a {n}-pick multi', { n: legs.length }) : esc(legLabel(legs[0]));
     return '<div class="row"><div class="t">' + t('{name} · {n} on {what}', { name: esc(b.name || 'Player'), n: b.stake, what }) + '</div>'
-      + '<div class="s">' + (legs.length > 1 ? legs.map((l) => esc(legLabel(l))).join(', ') : esc(legs[0].fx)) + ' <span class="pill ' + b.status + '">' + ICON[b.status] + '</span></div>'
+      + '<div class="s">' + (legs.length > 1 ? legs.map((l) => esc(legLabel(l))).join(', ') : esc(legs[0].fx)) + ' ' + badge(b.status, 'icon') + '</div>'
       + '<div class="r num">' + fmtOdds(b.odds) + '</div></div>';
   }).join('') + '</div>' : '<div class="empty">' + t('Nobody has placed a bet yet.') + '</div>');
 }
 
-function renderAll() { renderWallet(); renderLeagues(); renderMatches(); renderLive(); renderSlip(); renderMine(); renderBoard(); }
+function renderAll() { renderWallet(); renderLeagues(); renderMatches(); renderLive(); renderSlip(); renderMine(); renderBoard(); renderBetView(); renderAccount(); }
 
 /* ---------- events ---------- */
 function showTab(tab) {
@@ -814,7 +879,8 @@ $('live').addEventListener('click', (e) => {
 $('mine').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.dataset.mf) { S.mineFilter = b.dataset.mf; renderMine(); }
+  if (b.dataset.bet) openBet(b.dataset.bet);
+  else if (b.dataset.mf) { S.mineFilter = b.dataset.mf; renderMine(); }
   else if (b.dataset.older) { S.myLimit += 50; listenMine(); }
 });
 $('slip').addEventListener('click', (e) => {

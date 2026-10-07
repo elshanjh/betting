@@ -25,6 +25,10 @@ const AZ = {
   'Main': 'Əsas', 'Goals': 'Qollar', 'Halves': 'Hissələr', 'Players': 'Oyunçular', 'Score': 'Hesab',
   'Player': 'Oyunçu', 'Anytime': 'Qol vurar', 'First': 'İlk qol', 'Add to favourites': 'Sevimlilərə əlavə et', 'Remove from favourites': 'Sevimlilərdən çıxar',
   'Favourite': 'Sevimli',
+  // pages
+  'Back': 'Geri', 'Profile': 'Profil', 'Language': 'Dil', 'Save name': 'Adı yadda saxla', 'Find your team': 'Komandanı tap',
+  'Tap a team to add it. Up to 5.': 'Əlavə etmək üçün komandaya toxun. 5-ə qədər.', 'Showing {n} of {m}. Type to find more.': '{m} komandadan {n} göstərilir. Digərləri üçün axtar.',
+  'Bet details': 'Mərcin detalları', 'Bet not found.': 'Mərc tapılmadı.', 'Placed': 'Qoyulub', 'Picks': 'Seçimlər', 'Paid': 'Ödənildi',
   // wallet and account
   'Loading…': 'Yüklənir…', 'Not signed in yet': 'Hələ daxil olmamısan', 'Loading your coins…': 'Sikkələrin yüklənir…',
   'Your name on the table': 'Cədvəldəki adın', 'Join the game': 'Oyuna qoşul', 'Claim {n}': '{n} götür',

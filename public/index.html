@@ -72,6 +72,8 @@
         <h3 data-i18n="Latest bets">Latest bets</h3>
         <div id="feed"></div>
       </section>
+      <section class="panel" id="p-bet"><div id="betView"></div></section>
+      <section class="panel" id="p-account"><div id="account"></div></section>
       <footer id="foot"></footer>
     </div>
     <aside class="side">
@@ -90,30 +92,6 @@
     <div class="dlg-actions">
       <button class="btn ghost" value="cancel" data-i18n="Cancel">Cancel</button>
       <button class="btn" value="ok" id="confirmOk" data-i18n="Yes, place it">Yes, place it</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="accountDlg" aria-labelledby="accountTitle">
-  <form method="dialog" class="dlg" id="accountForm">
-    <h2 id="accountTitle" data-i18n="Your account">Your account</h2>
-    <p class="muted" id="accountWho"></p>
-    <label class="field"><span data-i18n="Name on the table">Name on the table</span><input type="text" id="accountName" maxlength="20" autocomplete="nickname"></label>
-    <div class="field">
-      <span><span data-i18n="Favourite teams">Favourite teams</span> <small class="muted" id="favCount"></small></span>
-      <div class="favs" id="favList"></div>
-      <div class="fav-add">
-        <input type="text" id="favIn" list="teamList" data-i18n-ph="Type a team, e.g. Qarabağ" placeholder="Type a team" autocomplete="off">
-        <button class="btn ghost" type="button" id="favAdd" data-i18n="Add">Add</button>
-      </div>
-      <datalist id="teamList"></datalist>
-      <small class="muted" data-i18n="Their matches show first in Sports and Live.">Their matches show first in Sports and Live.</small>
-    </div>
-    <div class="dlg-actions">
-      <button class="btn danger" value="logout" id="logoutBtn" data-i18n="Log out">Log out</button>
-      <span class="grow"></span>
-      <button class="btn ghost" value="cancel" data-i18n="Close">Close</button>
-      <button class="btn" value="save" id="accountSave" data-i18n="Save">Save</button>
     </div>
   </form>
 </dialog>
