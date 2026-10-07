@@ -2,8 +2,8 @@
 // and keeps a `live/{matchId}` document per match with the score, clock and
 // live prices, suspends betting around goals and late in the game, and
 // settles bets the moment a match ends. Started every 10 minutes by
-// .github/workflows/live.yml; exits by itself when nothing is live or about
-// to start, so most runs last a few seconds.
+// .github/workflows/live.yml; stays up while a match is live or kicks off
+// within 90 minutes, and exits otherwise.
 //
 // Env: FIREBASE_SERVICE_ACCOUNT, LIVE_GROUPS (comma list of league groups
 // from public/leagues.js; default below), MAX_MINUTES (default 340).
@@ -19,7 +19,10 @@ const API = env.ESPN_BASE || 'https://site.api.espn.com/apis/site/v2/sports/socc
 const GROUPS = (env.LIVE_GROUPS || 'Top leagues,European cups,National teams,More Europe').split(',').map((s) => s.trim());
 const SLUGS = new Set(LEAGUES.filter((l) => GROUPS.includes(l.group)).map((l) => l.slug));
 const TICK = Number(env.TICK_SECONDS || 20) * 1000;
-const LEAD = 12 * 60e3; // start watching this long before kickoff
+// Stay up this long before a kickoff. GitHub's schedule can skip runs for
+// hours, so one run should carry on into the next match rather than exit.
+const LEAD = 90 * 60e3;
+const IDLE_TICK = 60e3; // between matches: check once a minute, no ESPN calls
 const SPAN = 3 * 3600e3; // a match can't still be live this long after kickoff
 const GOAL_PAUSE = 60e3; // betting suspended this long after a goal
 const DEADLINE = Date.now() + Number(env.MAX_MINUTES || 340) * 60e3;
@@ -109,9 +112,10 @@ async function main() {
     if (Date.now() - loaded > 5 * 60e3) { watch = await candidates(); loaded = Date.now(); }
     watch = watch.filter((m) => m.status === 'scheduled');
     if (!watch.length) { console.log('nothing live or about to start'); break; }
-    await tick(watch);
+    const started = watch.some((m) => m.ko.toMillis() <= Date.now() + 60e3);
+    if (started) await tick(watch);
     if (ONCE) break;
-    await sleep(TICK);
+    await sleep(started ? TICK : IDLE_TICK);
   }
   console.log('live engine stopping');
 }

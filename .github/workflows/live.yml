@@ -25,3 +25,9 @@ jobs:
       - run: node scripts/live.mjs
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      # GitHub sometimes skips scheduled runs for hours; syncing here too
+      # means results get paid out whenever either workflow gets to run.
+      - run: node scripts/sync.mjs
+        if: always()
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
