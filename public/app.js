@@ -15,7 +15,7 @@ const S = {
   myBets: [], feed: [], openBets: [], busy: false, live: {},
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null, cat: 'main',
   slip: load('fs_slip', []), stake: 25, sheet: false, confirmOdds: 0,
-  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, teamQ: '',
+  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, teamQ: '', teamLg: null, collapsed: new Set(load('fs_collapsed', [])),
 };
 let mySub = null;
 const last = {};
@@ -38,7 +38,7 @@ const fmtOdds = (o) => (o >= 100 ? Math.round(o) : Number(o).toFixed(2));
 // The daily claim resets at 00:00 on the player's own clock. The player doc
 // stores their UTC offset in minutes (tz); older players default to DAY_OFFSET_HOURS.
 const DAY_MS = 86400000;
-const deviceTz = () => -new Date().getTimezoneOffset();
+const deviceTz = () => -new Date().getTimezoneOffset() || 0; // "|| 0" turns -0 (UTC) into 0, or Firestore stores a non-integer
 const tzOfMe = () => (S.me && Number.isInteger(S.me.tz) ? S.me.tz : DAY_OFFSET_HOURS * 60);
 function dayAt(tz, now = Date.now()) { return Math.floor((now + tz * 60000) / DAY_MS); }
 function claimDay(now = Date.now()) { return dayAt(tzOfMe(), now); }
@@ -360,7 +360,7 @@ const teamLeague = (x) => (x && BY_SLUG[x.sk] ? '<span class="team-lg">' + flagO
 function openAccount() {
   if (!S.user) return;
   if (!['account', 'bet'].includes($('app').dataset.tab)) S.prevTab = $('app').dataset.tab;
-  S.teamQ = '';
+  S.teamQ = ''; S.teamLg = null;
   showTab('account');
   renderAccount(true);
   window.scrollTo({ top: 0 });
@@ -376,7 +376,7 @@ function renderAccount(full) {
       + '<div class="card"><h3>' + t('Language') + '</h3><div class="lang-big"><button data-setlang="en" aria-pressed="' + (getLang() === 'en') + '">English</button><button data-setlang="az" aria-pressed="' + (getLang() === 'az') + '">Azərbaycanca</button></div></div>'
       + (S.me ? '<div class="card"><h3>' + t('Favourite teams') + ' <small class="muted" id="favCount"></small></h3><div class="fav-sel" id="favSel"></div>'
         + '<input type="search" id="teamQ" placeholder="' + esc(t('Find your team')) + '" autocomplete="off" value="' + esc(S.teamQ) + '">'
-        + '<small class="muted">' + t('Tap a team to add it. Up to 5.') + '</small><div class="team-list" id="teamResults"></div></div>' : '')
+        + '<small class="muted">' + t('Pick a league, then tap a team. Up to 5.') + '</small><div class="team-list" id="teamResults"></div></div>' : '')
       + '<button class="btn danger logout" data-logout="1">' + t('Log out') + '</button>';
   }
   if (!S.me) return;
@@ -386,13 +386,32 @@ function renderAccount(full) {
     return '<div class="fav-item">' + logo(x && x.logo, f) + '<span class="tn">' + esc(f) + '</span>' + teamLeague(x) + '<button data-team="' + esc(f) + '" aria-label="' + esc(t('Remove from favourites')) + '">×</button></div>'; }).join('')
     : '<small class="muted">' + t('No favourites yet.') + '</small>');
   const q = S.teamQ.trim().toLowerCase();
-  const all = Object.values(idx).filter((x) => !q || x.n.toLowerCase().includes(q))
-    .sort((a, b) => GROUP_ORDER(a.sk) - GROUP_ORDER(b.sk) || a.n.localeCompare(b.n));
-  const shown = all.slice(0, 80);
-  paint('teamResults', shown.map((x) => { const on = F.includes(x.n);
-    return '<button class="team-row" data-team="' + esc(x.n) + '" aria-pressed="' + on + '">' + logo(x.logo, x.n) + '<span class="tn">' + esc(x.n) + '</span>' + teamLeague(x) + '<span class="st">' + (on ? '★' : '☆') + '</span></button>'; }).join('')
-    + (all.length > shown.length ? '<div class="team-row muted">' + t('Showing {n} of {m}. Type to find more.', { n: shown.length, m: all.length }) + '</div>' : '')
-    + (!all.length ? '<div class="team-row muted">' + t('No upcoming match for "{q}".', { q: esc(S.teamQ) }) + '</div>' : ''));
+  const teamRow = (x) => { const on = F.includes(x.n);
+    return '<button class="team-row" data-team="' + esc(x.n) + '" aria-pressed="' + on + '">' + logo(x.logo, x.n) + '<span class="tn">' + esc(x.n) + '</span>' + (S.teamLg ? '' : teamLeague(x)) + '<span class="st">' + (on ? '★' : '☆') + '</span></button>'; };
+  let h;
+  if (q) {
+    // Searching looks across every league.
+    const hits = Object.values(idx).filter((x) => x.n.toLowerCase().includes(q)).sort((a, b) => a.n.localeCompare(b.n));
+    h = hits.length ? hits.slice(0, 60).map(teamRow).join('') : '<div class="team-row muted">' + t('No upcoming match for "{q}".', { q: esc(S.teamQ) }) + '</div>';
+  } else if (S.teamLg) {
+    const L = BY_SLUG[S.teamLg];
+    h = '<button class="team-row lg-back" data-teamlg="">‹ ' + t('All leagues') + '<span class="tn"></span>' + flagOf(S.teamLg) + '<b>' + esc(L ? t(L.name) : S.teamLg) + '</b></button>'
+      + Object.values(idx).filter((x) => x.sk === S.teamLg).sort((a, b) => a.n.localeCompare(b.n)).map(teamRow).join('');
+  } else {
+    // Leagues first, grouped like the league picker.
+    const per = {};
+    Object.values(idx).forEach((x) => { per[x.sk] = (per[x.sk] || 0) + 1; });
+    h = GROUPS.map((g) => {
+      const ls = LEAGUES.filter((l) => l.group === g && per[l.slug]);
+      if (!ls.length) return '';
+      return '<div class="ddl-g">' + esc(t(g)) + '</div>' + ls.map((l) => {
+        const mine = F.filter((f) => idx[f] && idx[f].sk === l.slug).length;
+        return '<button class="team-row" data-teamlg="' + l.slug + '">' + flagOf(l.slug) + '<span class="tn">' + esc(t(l.name)) + '</span>'
+          + (mine ? '<span class="st on">★ ' + mine + '</span>' : '') + '<span class="ddl-c">' + per[l.slug] + '</span><span class="chev" aria-hidden="true">›</span></button>';
+      }).join('');
+    }).join('');
+  }
+  paint('teamResults', h);
 }
 
 async function saveFavs(list) {
@@ -410,6 +429,7 @@ $('account').addEventListener('click', async (e) => {
   if (!b) return;
   if (b.dataset.back) goBack();
   else if (b.dataset.team) toggleFav(b.dataset.team);
+  else if (b.dataset.teamlg !== undefined) { S.teamLg = b.dataset.teamlg || null; renderAccount(); $('teamResults').scrollTop = 0; }
   else if (b.dataset.setlang) { applyLang(b.dataset.setlang, true); renderAccount(true); }
   else if (b.dataset.logout) { setSlip([]); await signOut(auth); toast(t('Logged out. Your coins will miss you. Probably.')); }
 });
@@ -444,11 +464,49 @@ function renderWallet() {
       const mins = Math.max(1, Math.round((nextClaimAt() - Date.now()) / 60000));
       sub = t('Next {n} coins in {t}', { n: DAILY_COINS, t: mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm' });
     } else sub = t("Today's {n} coins are waiting", { n: DAILY_COINS });
-    h = '<div class="bal" title="' + esc(me.name + ' · ' + sub) + '"><span class="coin" aria-hidden="true"></span><b class="num">' + (me.coins || 0) + '</b></div>'
+    h = '<button class="bal" id="balBtn" aria-haspopup="dialog" aria-expanded="' + !$('walletPop').hidden + '" title="' + esc(me.name + ' · ' + sub) + '"><span class="coin" aria-hidden="true"></span><b class="num">' + (me.coins || 0) + '</b></button>'
       + (claimed ? '' : '<button class="btn gold" id="claimBtn">+' + DAILY_COINS + '</button>');
   }
   paint('wallet', h);
   $('acctBtn').hidden = !S.user;
+  if (!S.me) $('walletPop').hidden = true;
+  renderWalletPop();
+}
+
+// Coin panel: countdown to the next daily coins and your numbers.
+function hms(msLeft) {
+  const s = Math.max(0, Math.floor(msLeft / 1000));
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((x) => String(x).padStart(2, '0')).join(':');
+}
+function myStats() {
+  const me = S.me, ps = S.players.slice().sort((a, b) => (b.coins || 0) - (a.coins || 0));
+  let staked = 0, back = 0, best = 0, inplay = 0;
+  S.myBets.forEach((b) => {
+    if (b.status === 'open') inplay += b.stake;
+    else { staked += b.stake; back += b.payout || 0; }
+    if (b.status === 'won') best = Math.max(best, b.payout - b.stake);
+  });
+  const w = me.won || 0, l = me.lost || 0;
+  return { rank: ps.findIndex((p) => p.id === S.user.uid) + 1, of: ps.length, w, l, rate: w + l ? Math.round((100 * w) / (w + l)) + '%' : '–', net: back - staked, best, inplay };
+}
+let popTimer = null;
+function renderWalletPop() {
+  const pop = $('walletPop');
+  if (pop.hidden || !S.me) { clearInterval(popTimer); popTimer = null; return; }
+  const claimed = (S.me.lastClaimDay || 0) >= claimDay(), st = myStats();
+  const cell = (k, v, cls) => '<div><small>' + t(k) + '</small><b class="num ' + (cls || '') + '">' + v + '</b></div>';
+  pop.innerHTML = '<div class="wp-claim">' + (claimed
+    ? '<small>' + t('Next {n} coins in', { n: DAILY_COINS }) + '</small><b class="num" id="wpClock">' + hms(nextClaimAt() - Date.now()) + '</b><small>' + t('at 00:00 your time') + '</small>'
+    : '<small>' + t("Today's {n} coins are waiting", { n: DAILY_COINS }) + '</small><button class="btn gold" data-claim="1">' + t('Claim {n}', { n: DAILY_COINS }) + '</button>') + '</div>'
+    + '<div class="wp-grid">' + cell('Coins', S.me.coins || 0) + cell('Rank', '#' + st.rank + ' <small>/ ' + st.of + '</small>') + cell('In play', st.inplay)
+    + cell('Record', st.w + '–' + st.l) + cell('Win rate', st.rate) + cell('Profit', (st.net > 0 ? '+' : '') + st.net, st.net > 0 ? 'won-n' : st.net < 0 ? 'lost-n' : '') + '</div>'
+    + '<button class="linkish" data-gomine="1">' + t('See all my bets') + ' ›</button>';
+  if (claimed && !popTimer) popTimer = setInterval(() => { const c = $('wpClock'); if (!c) return; const left = nextClaimAt() - Date.now(); if (left <= 0) { renderWallet(); } else c.textContent = hms(left); }, 1000);
+}
+function toggleWalletPop(on) {
+  $('walletPop').hidden = !on;
+  const b = $('balBtn'); if (b) b.setAttribute('aria-expanded', on);
+  renderWalletPop();
 }
 
 function renderLeagues() {
@@ -564,8 +622,16 @@ function fixtureRow(m, now, mine, friends) {
   return h + '</article>';
 }
 
-function leagueHead(sk, lg) {
-  return '<div class="lg-head">' + flagOf(sk) + esc(t(lg)) + '</div>';
+// Tap a league heading to fold it away (remembered on this device).
+function leagueHead(sk, lg, n) {
+  const shut = S.collapsed.has(sk);
+  return '<button class="lg-head" data-collapse="' + esc(sk) + '" aria-expanded="' + !shut + '">' + flagOf(sk) + '<span class="ddl-n">' + esc(t(lg)) + '</span>'
+    + (shut ? '<span class="ddl-c">' + n + '</span>' : '') + '<span class="chev-d" aria-hidden="true"></span></button>';
+}
+function toggleCollapse(sk) {
+  if (S.collapsed.has(sk)) S.collapsed.delete(sk); else S.collapsed.add(sk);
+  save('fs_collapsed', [...S.collapsed]);
+  renderMatches();
 }
 
 function renderMatches() {
@@ -591,15 +657,27 @@ function renderMatches() {
     const up = list.filter((m) => isOpen(m, now) && inDay(m));
     const wait = list.filter((m) => m.status === 'scheduled' && ms(m.ko) <= now);
     const done = list.filter((m) => m.status === 'final' || m.status === 'void').reverse().slice(0, 20);
-    let curDay = '', curLg = '';
-    up.slice(0, S.shown).forEach((m) => {
+    // Paging counts open leagues only; folded leagues show as a heading
+    // with their match count within the days on screen.
+    const openUp = up.filter((m) => !S.collapsed.has(m.sk));
+    const page = openUp.slice(0, S.shown);
+    const until = openUp.length > S.shown ? ms(page[page.length - 1].ko) : Infinity;
+    const onScreen = up.filter((m) => !S.collapsed.has(m.sk) ? page.includes(m) : ms(m.ko) <= until);
+    const days = [];
+    onScreen.forEach((m) => {
       const d = new Date(ms(m.ko)), k = dayKey(d);
-      if (k !== curDay) { if (curDay) h += '</section>'; curDay = k; curLg = ''; h += '<section class="block"><div class="block-h">' + esc(fmtDay(d)) + '</div>'; }
-      if (m.sk !== curLg) { curLg = m.sk; h += leagueHead(m.sk, m.lg); }
-      h += row(m);
+      let day = days.find((x) => x.k === k);
+      if (!day) days.push(day = { k, d, lgs: [] });
+      let lg = day.lgs.find((x) => x.sk === m.sk);
+      if (!lg) day.lgs.push(lg = { sk: m.sk, lg: m.lg, ms: [] });
+      lg.ms.push(m);
     });
-    if (curDay) h += '</section>';
-    if (up.length > S.shown) h += '<button class="more-btn" data-showmore="1">' + t('Show more games ({n} more)', { n: up.length - S.shown }) + '</button>';
+    days.forEach((day) => {
+      h += '<section class="block"><div class="block-h">' + esc(fmtDay(day.d)) + '</div>';
+      day.lgs.forEach((g) => { h += leagueHead(g.sk, g.lg, g.ms.length); if (!S.collapsed.has(g.sk)) h += g.ms.map(row).join(''); });
+      h += '</section>';
+    });
+    if (openUp.length > S.shown) h += '<button class="more-btn" data-showmore="1">' + t('Show more games ({n} more)', { n: openUp.length - S.shown }) + '</button>';
     if (!up.length) h += '<div class="empty">' + (q ? t('No upcoming match for "{q}".', { q: esc(S.q) }) : t('No upcoming matches here. Try another league or day.')) + '</div>';
     if (wait.length || done.length) {
       h += '<button class="more-btn" data-showdone="1" aria-expanded="' + S.showDone + '">' + (S.showDone ? t('Hide live and recent results') : t('Show live and recent results ({n})', { n: wait.length + done.length })) + '</button>';
@@ -834,7 +912,23 @@ $('homeLink').addEventListener('click', (e) => {
 });
 document.querySelector('.lang').addEventListener('click', (e) => { const b = e.target.closest('[data-lang]'); if (b) applyLang(b.dataset.lang, true); });
 $('wallet').addEventListener('submit', (e) => { e.preventDefault(); const i = $('nameIn'); if (i) join(i.value); });
-$('wallet').addEventListener('click', (e) => { if (e.target.closest('#claimBtn')) claim(); });
+$('wallet').addEventListener('click', (e) => {
+  if (e.target.closest('#claimBtn')) claim();
+  else if (e.target.closest('#balBtn')) toggleWalletPop($('walletPop').hidden);
+});
+$('walletPop').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.claim) claim();
+  else if (b.dataset.gomine) { toggleWalletPop(false); showTab('mine'); window.scrollTo({ top: 0 }); }
+});
+// A tap outside the coin panel only closes it (it doesn't also press what's underneath).
+document.addEventListener('click', (e) => {
+  if ($('walletPop').hidden || e.target.closest('#walletPop') || e.target.closest('#balBtn')) return;
+  e.stopPropagation(); e.preventDefault();
+  toggleWalletPop(false);
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('walletPop').hidden) toggleWalletPop(false); });
 $('acctBtn').addEventListener('click', openAccount);
 $('leagueBtn').addEventListener('click', () => openLeagues($('leagueMenu').hidden));
 $('leagueMenu').addEventListener('click', (e) => {
@@ -877,6 +971,7 @@ $('matches').addEventListener('click', (e) => {
     if ($('authEmail')) { $('authEmail').value = email; $('authEmail').focus(); }
     return;
   }
+  if (b.dataset.collapse) { toggleCollapse(b.dataset.collapse); return; }
   if (b.dataset.more) { S.exp = S.exp === b.dataset.more ? null : b.dataset.more; renderMatches(); }
   else if (b.dataset.cat) { S.cat = b.dataset.cat; renderMatches(); }
   else if (b.dataset.fav) toggleFav(b.dataset.fav);

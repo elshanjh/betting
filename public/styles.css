@@ -30,18 +30,31 @@ input[type=text],input[type=number],input[type=email],input[type=password],input
 .logo-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:7px;background:var(--accent);color:var(--accent-ink);font-family:var(--display);font-weight:700;font-size:17px}
 .logo-name{font-family:var(--display);font-weight:600;font-size:21px;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap}
 .logo-name b{color:var(--accent);font-weight:700}
-.bar-right{display:flex;align-items:center;gap:8px}
+.bar-right{display:flex;align-items:center;gap:8px;position:relative}
 .lang{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .lang button{border:0;background:transparent;padding:5px 8px;font-size:12px;font-weight:700;color:var(--muted)}
 .lang button[aria-pressed=true]{background:var(--ob-h);color:var(--ink)}
 .wallet{display:flex;align-items:center;gap:6px}
 .wallet small{color:var(--muted);font-size:13px}
-.bal{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 12px 4px 6px}
+.bal{display:flex;align-items:center;gap:6px;cursor:pointer;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 12px 4px 6px}
 .bal b{font-family:var(--display);font-size:21px;color:var(--accent)}
 .coin{width:18px;height:18px;border-radius:50%;background:var(--accent);box-shadow:inset 0 0 0 3px var(--bar),inset 0 0 0 5px var(--accent);flex:none}
 .acct{border:1px solid var(--line);background:var(--card);border-radius:50%;width:36px;height:36px;display:grid;place-items:center;font-size:16px}
 .join{display:flex;gap:6px}
 .join input{width:120px}
+
+/* coin panel */
+.wpop{position:absolute;right:0;top:calc(100% + 8px);width:min(320px,calc(100vw - 20px));z-index:30;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 14px 34px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:12px}
+.wp-claim{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px}
+.wp-claim small{color:var(--muted);font-size:12px}
+.wp-claim b{font-family:var(--display);font-size:38px;color:var(--accent);line-height:1}
+.wp-claim .btn{margin-top:4px;padding:9px 20px;font-size:16px}
+.wp-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.wp-grid div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+.wp-grid small{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.wp-grid b{font-family:var(--display);font-size:19px}
+.wp-grid b small{display:inline;font-size:12px;text-transform:none;letter-spacing:0}
+.wpop .linkish{align-self:center;color:var(--accent);font-weight:700;text-decoration:none}
 
 /* buttons and chips */
 .btn{border:0;border-radius:6px;padding:9px 14px;font-weight:700;background:var(--green);color:#04210f}
@@ -106,7 +119,11 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
 .block-h{background:var(--card2);padding:8px 12px;font-family:var(--display);font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .fav-block{border-color:#5b4a12}
 .fav-block .block-h{color:var(--accent)}
-.lg-head{padding:7px 12px;font-size:13px;font-weight:700;color:var(--ink);border-top:1px solid var(--line);background:rgba(255,255,255,.02)}
+.lg-head{width:100%;border:0;border-top:1px solid var(--line);padding:9px 12px;font-size:13px;font-weight:700;color:var(--ink);background:rgba(255,255,255,.02);text-align:left;cursor:pointer}
+.lg-head:hover{background:rgba(255,255,255,.05)}
+.chev-d{width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(225deg);margin:4px 4px 0 6px;flex:none;transition:transform .15s}
+.lg-head[aria-expanded=false] .chev-d{transform:rotate(45deg);margin-top:-2px}
+.lg-head[aria-expanded=false]{color:var(--muted)}
 .fx{border-top:1px solid var(--line)}
 .block .lg-head + .fx{border-top:0}
 .fx-row{display:grid;grid-template-columns:52px minmax(0,1fr) auto auto 46px;grid-template-areas:"time teams score odds more";gap:10px;align-items:center;padding:8px 12px}
@@ -251,6 +268,11 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
 .team-row .st{font-size:18px;color:var(--muted)}
 .team-row[aria-pressed=true] .st{color:var(--accent)}
 .team-row[aria-pressed=true]{background:rgba(255,198,43,.06)}
+.team-row .st.on{color:var(--accent);font-size:13px;font-weight:700}
+.team-row .chev{color:var(--muted);font-size:18px}
+.team-row.lg-back{color:var(--accent);font-weight:700;background:var(--card2)}
+.team-row.lg-back b{color:var(--ink)}
+.team-list .ddl-g{background:var(--card2);border-bottom:1px solid var(--line)}
 .team-lg{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
 .logout{width:100%;padding:12px}
 
