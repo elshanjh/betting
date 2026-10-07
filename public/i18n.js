@@ -28,6 +28,7 @@ const AZ = {
   // pages
   'Back': 'Geri', 'Profile': 'Profil', 'Language': 'Dil', 'Save name': 'Adı yadda saxla', 'Find your team': 'Komandanı tap',
   'Tap a team to add it. Up to 5.': 'Əlavə etmək üçün komandaya toxun. 5-ə qədər.', 'Showing {n} of {m}. Type to find more.': '{m} komandadan {n} göstərilir. Digərləri üçün axtar.',
+  'bets': 'mərc', 'Hide': 'Gizlət', '{n} more bets': '{n} əlavə mərc',
   'Bet details': 'Mərcin detalları', 'Bet not found.': 'Mərc tapılmadı.', 'Placed': 'Qoyulub', 'Picks': 'Seçimlər', 'Paid': 'Ödənildi',
   'Next {n} coins in': 'Növbəti {n} sikkəyə qalıb', 'at 00:00 your time': 'sənin saatınla 00:00-da', 'Rank': 'Yer', 'See all my bets': 'Bütün mərclərim',
   'Pick a league, then tap a team. Up to 5.': 'Liqa seç, sonra komandaya toxun. 5-ə qədər.',

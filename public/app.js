@@ -602,14 +602,15 @@ function marketTabs(m, sel) {
 function fixtureRow(m, now, mine, friends) {
   const open = isOpen(m, now), fin = m.status === 'final', lv = S.live[m.id];
   const inSlip = S.slip.find((l) => !l.live && l.m === m.id), sel = inSlip ? inSlip.k : null;
-  let h = '<article class="fx' + (S.exp === m.id ? ' exp' : '') + '"><div class="fx-row">'
+  let h = '<article class="fx' + (S.exp === m.id ? ' exp' : '') + '"><div class="fx-row' + (open ? ' tap' : '') + '"' + (open ? ' data-row="' + esc(m.id) + '"' : '') + '>'
     + '<div class="fx-time">' + (lv ? '<span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span>' : '<b>' + esc(fmtTime(new Date(ms(m.ko)))) + '</b>')
     + (m.src === 'elo' && open ? '<span class="tag" title="' + esc(t('No bookmaker price yet; odds from World Football Elo ratings')) + '">Elo</span>' : '') + '</div>'
     + '<div class="fx-teams">' + teamLine(m, 'h') + teamLine(m, 'a') + '</div>';
   if (fin) h += '<div class="fx-score num">' + m.sh + '<br>' + m.sa + '</div>';
   else if (lv) h += '<div class="fx-score num live">' + lv.sh + '<br>' + lv.sa + '</div>';
   h += '<div class="odds">' + (fin ? '' : ['h', 'd', 'a'].map((p) => oddBtn(m.id, '1x2:' + p, m.p['1x2:' + p], p === 'h' ? '1' : p === 'd' ? 'X' : '2', sel, !open, label('1x2:' + p, m.home, m.away))).join('')) + '</div>';
-  h += open ? '<button class="more" data-more="' + esc(m.id) + '" aria-expanded="' + (S.exp === m.id) + '">' + (S.exp === m.id ? '−' : '+' + extraCount(m)) + '</button>' : '<span></span>';
+  h += open ? '<button class="more" data-more="' + esc(m.id) + '" aria-expanded="' + (S.exp === m.id) + '" aria-label="' + esc(S.exp === m.id ? t('Hide') : t('{n} more bets', { n: extraCount(m) })) + '">'
+    + (S.exp === m.id ? '<span>' + t('Hide') + '</span><b class="mchev up"></b>' : '<span>' + t('bets') + '</span><b class="num">+' + extraCount(m) + '</b>') + '</button>' : '<span></span>';
   h += '</div>';
   const notes = [];
   if (friends) notes.push('<span class="crowd">👥 ' + (friends === 1 ? t('1 friend on this') : t('{n} friends on this', { n: friends })) + '</span>');
@@ -963,7 +964,12 @@ $('matches').addEventListener('submit', (e) => {
 });
 $('matches').addEventListener('click', (e) => {
   const b = e.target.closest('button');
-  if (!b) return;
+  if (!b) {
+    // Tapping the match itself (teams, time, logos) opens all its bets.
+    const r = e.target.closest('[data-row]');
+    if (r) { S.exp = S.exp === r.dataset.row ? null : r.dataset.row; renderMatches(); }
+    return;
+  }
   if (b.id === 'signInBtn') { signIn(); return; }
   if (b.dataset.mode) {
     const email = $('authEmail') ? $('authEmail').value : '';
