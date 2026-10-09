@@ -180,6 +180,13 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
 .pl-n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-row .ob{padding:6px 4px}
 
+/* live rows */
+.live-fx .fx-time .clock{font-size:12px}
+.live-fx.paused .odds .ob{opacity:.45}
+.paused-note{color:var(--muted);font-weight:600}
+.live-fx .sels .ob{flex-direction:column;align-items:flex-start;gap:2px}
+.live-fx .sels .ob span{overflow-wrap:break-word;word-break:normal}
+
 /* live */
 .lv{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
 .lv-head{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:13px}

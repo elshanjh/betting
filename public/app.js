@@ -15,7 +15,7 @@ const S = {
   myBets: [], feed: [], openBets: [], busy: false, live: {},
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null, cat: 'main',
   slip: load('fs_slip', []), stake: 25, sheet: false, confirmOdds: 0,
-  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, teamQ: '', teamLg: null, collapsed: new Set(load('fs_collapsed', [])),
+  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, liveExp: null, teamQ: '', teamLg: null, collapsed: new Set(load('fs_collapsed', [])),
 };
 let mySub = null;
 const last = {};
@@ -689,16 +689,27 @@ function renderMatches() {
   paint('matches', h);
 }
 
-function liveCard(lv) {
-  const sel = S.slip.find((l) => l.live && l.m === lv.id);
-  const fresh = Date.now() - ms(lv.at) < 55e3, closed = lv.min >= 85;
-  let h = '<article class="lv' + (lv.susp || !fresh ? ' susp' : '') + '"><div class="lv-head"><span class="lv-lg">' + flagOf(lv.sk) + esc(t(lv.lg)) + '</span>'
-    + '<span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span></div>'
-    + '<div class="lv-score"><span class="tm">' + logo(lv.hl, lv.home) + '<span class="tn">' + esc(lv.home) + '</span></span><b>' + lv.sh + ' – ' + lv.sa + '</b><span class="tm away"><span class="tn">' + esc(lv.away) + '</span>' + logo(lv.al, lv.away) + '</span></div>';
-  if (lv.susp || !fresh) h += '<div class="susp-note">' + (closed ? t('Live betting closed for the last minutes.') : !fresh ? t('Waiting for live data…') : '⚽ ' + t('Something happened. Betting paused for a moment.')) + '</div>';
-  if (!closed) {
-    h += '<div class="mkts">' + liveMarkets(lv.home, lv.away, lv.p || {}).map((g) => '<div><h4>' + esc(t(g.name)) + '</h4><div class="sels">'
-      + g.sels.map((s) => oddBtn(lv.id, s[0], lv.p[s[0]], short(s[1]), sel ? sel.k : null, false, label(s[0], lv.home, lv.away))).join('') + '</div></div>').join('') + '</div>';
+// Live match as a compact row, like the main page: clock, teams, score,
+// live 1 X 2, and a "bets" button (or a tap on the row) for the rest.
+function liveRow(lv) {
+  const sel = S.slip.find((l) => l.live && l.m === lv.id), selK = sel ? sel.k : null;
+  const fresh = Date.now() - ms(lv.at) < 55e3, closed = lv.min >= 85, paused = lv.susp || !fresh;
+  const p = lv.p || {}, exp = S.liveExp === lv.id;
+  const others = liveMarkets(lv.home, lv.away, p).filter((g) => g.name !== 'Match result');
+  const nOther = others.reduce((n, g) => n + g.sels.length, 0);
+  const team = (name, url) => '<div class="tm">' + logo(url, name) + '<span class="tn">' + esc(name) + '</span>' + (isFav(name) ? '<span class="star on">★</span>' : '') + '</div>';
+  let h = '<article class="fx live-fx' + (exp ? ' exp' : '') + (paused ? ' paused' : '') + '"><div class="fx-row tap" data-lrow="' + esc(lv.id) + '">'
+    + '<div class="fx-time"><span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span></div>'
+    + '<div class="fx-teams">' + team(lv.home, lv.hl) + team(lv.away, lv.al) + '</div>'
+    + '<div class="fx-score num live">' + lv.sh + '<br>' + lv.sa + '</div>'
+    + '<div class="odds">' + (closed ? '' : ['h', 'd', 'a'].map((x) => oddBtn(lv.id, 'lv:1x2:' + x, p['lv:1x2:' + x], x === 'h' ? '1' : x === 'd' ? 'X' : '2', selK, paused || p['lv:1x2:' + x] == null, label('lv:1x2:' + x, lv.home, lv.away))).join('')) + '</div>'
+    + (closed || !nOther ? '<span></span>' : '<button class="more" data-lmore="' + esc(lv.id) + '" aria-expanded="' + exp + '">'
+      + (exp ? '<span>' + t('Hide') + '</span><b class="mchev up"></b>' : '<span>' + t('bets') + '</span><b class="num">+' + nOther + '</b>') + '</button>')
+    + '</div>';
+  if (paused || closed) h += '<div class="fx-notes"><span class="paused-note">' + (closed ? t('Live betting closed for the last minutes.') : !fresh ? t('Waiting for live data…') : '⚽ ' + t('Something happened. Betting paused for a moment.')) + '</span></div>';
+  if (exp && !closed) {
+    h += '<div class="mk">' + others.map((g) => '<div class="mk-g"><h4>' + esc(t(g.name)) + '</h4><div class="sels">'
+      + g.sels.map((x) => oddBtn(lv.id, x[0], p[x[0]], short(x[1]), selK, paused, label(x[0], lv.home, lv.away))).join('') + '</div></div>').join('') + '</div>';
   }
   return h + '</article>';
 }
@@ -713,7 +724,13 @@ function renderLive() {
   else if (!list.length) {
     const next = S.matches.filter((m) => isOpen(m)).sort((a, b) => ms(a.ko) - ms(b.ko))[0];
     h = '<div class="empty">' + t('No match is live right now.') + (next ? ' ' + t('Next kickoff: {m}, {w}.', { m: '<b>' + esc(next.home) + ' v ' + esc(next.away) + '</b>', w: esc(fmtWhen(next.ko)) }) : '') + ' ' + t('Live matches show up here with live odds, next goal and more.') + '</div>';
-  } else h = '<div class="list">' + list.map((lv) => { try { return liveCard(lv); } catch (e) { console.error(e); return ''; } }).join('') + '</div>';
+  } else {
+    // One block, grouped by league like the main page (favourites first).
+    const groups = [];
+    list.forEach((lv) => { let g = groups.find((x) => x.sk === lv.sk); if (!g) groups.push(g = { sk: lv.sk, lg: lv.lg, items: [] }); g.items.push(lv); });
+    h = '<section class="block">' + groups.map((g) => leagueHead(g.sk, g.lg, g.items.length)
+      + (S.collapsed.has(g.sk) ? '' : g.items.map((lv) => { try { return liveRow(lv); } catch (e) { console.error(e); return ''; } }).join(''))).join('') + '</section>';
+  }
   paint('live', h);
 }
 
@@ -987,8 +1004,15 @@ $('matches').addEventListener('click', (e) => {
   }
 });
 $('live').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-k]');
-  if (!b) return;
+  const b = e.target.closest('button');
+  if (!b) {
+    const r = e.target.closest('[data-lrow]');
+    if (r) { S.liveExp = S.liveExp === r.dataset.lrow ? null : r.dataset.lrow; renderLive(); }
+    return;
+  }
+  if (b.dataset.collapse) { toggleCollapse(b.dataset.collapse); renderLive(); return; }
+  if (b.dataset.lmore) { S.liveExp = S.liveExp === b.dataset.lmore ? null : b.dataset.lmore; renderLive(); return; }
+  if (!b.dataset.k) return;
   if (!S.me) { toast(t('Join the game first.')); return; }
   toggleLeg(b.dataset.mid, b.dataset.k);
   if (window.innerWidth < 900 && S.slip.length) openSheet(true);
