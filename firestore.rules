@@ -122,16 +122,18 @@ service cloud.firestore {
           && b.odds is number && b.odds >= 1
           && b.legs is list && b.legs.size() >= 1 && b.legs.size() <= 6
           && b.mids is list && b.mids.size() == b.legs.size()
-          && (b.get('live', false) == true
-            ? b.legs.size() == 1 && liveLegOk(b.legs[0], b.mids[0])
-            : leg(b, 0) && leg(b, 1) && leg(b, 2) && leg(b, 3) && leg(b, 4) && leg(b, 5))
+          && (!('live' in b) || b.live is bool)
+          && leg(b, 0) && leg(b, 1) && leg(b, 2) && leg(b, 3) && leg(b, 4) && leg(b, 5)
           // the stake is paid for in the same batch
           && getAfter(me).data.lastBet == betId
           && getAfter(me).data.coins == get(me).data.coins - b.stake;
       }
 
+      // Each pick is checked as a live pick (key "lv:...") or a pre-match one,
+      // so live and pre-match picks can share a multi-bet.
       function leg(b, i) {
-        return b.legs.size() <= i || legOk(b.legs[i], b.mids[i]);
+        return b.legs.size() <= i
+          || (b.legs[i].k.matches('lv:.*') ? liveLegOk(b.legs[i], b.mids[i]) : legOk(b.legs[i], b.mids[i]));
       }
 
       // The match is still open and the price is exactly the published one.
@@ -149,15 +151,13 @@ service cloud.firestore {
           && l.o == m.p[l.k]; // an unknown key is an error, so denied
       }
 
-      // Live bets are singles at the live price, while betting is open,
+      // Live picks are at the live price, while betting is open,
       // from live data at most 60s old, recording the score and clock they
       // were placed at (settlement uses these to catch unseen goals).
       function liveLegOk(l, mid) {
         let lv = get(/databases/$(database)/documents/live/$(l.m)).data;
-        return l is map
-          && l.keys().hasOnly(['m', 'k', 'o', 'label', 'fx', 'sc', 't'])
-          && l.m is string && l.m == mid
-          && l.k is string && l.k.matches('lv:.*')
+        return l.keys().hasOnly(['m', 'k', 'o', 'label', 'fx', 'sc', 't'])
+          && l.m == mid
           && l.label is string && l.label.size() <= 120
           && l.fx is string && l.fx.size() <= 120
           && lv.done == false

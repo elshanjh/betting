@@ -138,8 +138,8 @@ test('bad live bets are rejected', async () => {
   await assertFails(liveBet(db, { sc: [0, 0] }));                // wrong score
   await assertFails(liveBet(db, { t: 3000 }));                   // wrong clock
   await assertFails(liveBet(db, { k: '1x2:h', o: 1.4 }));        // not a live market
-  await assertFails(liveBet(db, { live: null }));                // live pick validated as pre-match
-  await assertFails(liveBet(db, { extra: [{ m: 'm1', k: '1x2:h', o: P['1x2:h'], label: 'x', fx: 'x' }] })); // live multi
+  await assertFails(liveBet(db, { k: 'lv:1x2:h', o: 1.4, sc: [0, 0] })); // live pick with stale score
+  await assertFails(liveBet(db, { extra: [{ m: 'm1', k: '1x2:h', o: 9, label: 'x', fx: 'x' }] })); // multi with a made-up pre-match price
   await seedLive({ susp: true });
   await assertFails(liveBet(db));                                // suspended
   await seedLive({ at: Timestamp.fromMillis(Date.now() - 120e3) });
@@ -189,4 +189,24 @@ test('new players store their time zone', async () => {
   const fields = { name: 'Z', coins: 0, lastClaimDay: 0, won: 0, lost: 0, joined: serverTimestamp() };
   await assertSucceeds(setDoc(doc(as('z1'), 'players/z1'), { ...fields, tz: 180 }));
   await assertFails(setDoc(doc(as('z2'), 'players/z2'), { ...fields, tz: 'Europe/Tallinn' }));
+});
+
+test('live and pre-match picks combine in one multi-bet', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    for (let i = 3; i <= 8; i++) await setDoc(doc(ctx.firestore(), 'live/m' + i), {
+      home: 'A', away: 'B', sh: 0, sa: 1, min: 30, clk: 1790, susp: false, done: false, p: { 'lv:1x2:h': 4.5, 'lv:ng:a': 2.2 }, at: Timestamp.now(),
+    });
+  });
+  const L = (i, k = 'lv:ng:a', o = 2.2) => ({ m: 'm' + i, k, o, label: 'x', fx: 'A v B', sc: [0, 1], t: 1790 });
+  const go = (legs, stake = 10, before = 100) => {
+    const db = as('alice'), ref = doc(collection(db, 'bets')), b = writeBatch(db);
+    b.set(ref, { uid: 'alice', name: 'x', legs, mids: legs.map((l) => l.m), stake, odds: 2, status: 'open', live: true, placed: serverTimestamp() });
+    b.update(doc(db, 'players/alice'), { coins: before - stake, lastBet: ref.id });
+    return b.commit();
+  };
+  await assertSucceeds(go([L(3)], 10, 100));                                                         // single live
+  await assertSucceeds(go([L(4), { m: 'm1', k: '1x2:h', o: P['1x2:h'], label: 'x', fx: 'x' }], 10, 90)); // live + pre-match
+  await assertSucceeds(go([3, 4, 5, 6, 7, 8].map((i) => L(i)), 10, 80));                                // six live picks, the most rule work
+  // a stale live price in a mix is refused
+  await assertFails(go([L(3, 'lv:1x2:h', 9.9), { m: 'm1', k: '1x2:h', o: P['1x2:h'], label: 'x', fx: 'x' }], 10, 70));
 });

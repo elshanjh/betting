@@ -151,7 +151,8 @@ loudly in the Actions tab, and only `scripts/sync.mjs` needs updating.
 The **Live** tab lists matches being played right now (top leagues, European
 cups, national teams and more European leagues) with the score, the clock
 and live odds for the result, next goal, total goals, double chance and both
-teams to score. Live bets are singles.
+teams to score. Live picks go in the same slip as pre-match ones, so a
+multi-bet can mix both (up to 6 picks).
 
 - `scripts/live.mjs` runs in GitHub Actions (`.github/workflows/live.yml`).
   It wakes every 10 minutes; if a match is live or about to start it stays

@@ -29,3 +29,13 @@ test('live settlement and the unseen-goal check', () => {
   const j = judge([{ m: 'x', k: 'lv:ng:a', o: 3, sc: [1, 0], t: 1200 }], { x: m });
   assert.deepEqual([j.status, j.odds], ['won', 3]);
 });
+
+test('a multi-bet mixing live and pre-match picks settles on both', () => {
+  const live = { status: 'final', sh: 2, sa: 1, goals: [{ s: 'h', t: 600, h: 1 }, { s: 'a', t: 3000, h: 2 }, { s: 'h', t: 4000, h: 2 }] };
+  const pre = { status: 'final', sh: 0, sa: 0, goals: [] };
+  const legs = [{ m: 'L', k: 'lv:ng:a', o: 3, sc: [1, 0], t: 1200 }, { m: 'P', k: '1x2:d', o: 3.2 }];
+  assert.deepEqual(judge(legs, { L: live, P: pre }).status, 'won');
+  assert.equal(judge(legs, { L: live, P: pre }).odds, 9.6);
+  assert.equal(judge(legs, { L: live, P: { ...pre, status: 'scheduled' } }).status, 'open');
+  assert.equal(judge([legs[0], { m: 'P', k: '1x2:h', o: 2 }], { L: live, P: pre }).status, 'lost');
+});

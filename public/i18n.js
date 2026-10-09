@@ -28,6 +28,7 @@ const AZ = {
   // pages
   'Back': 'Geri', 'Profile': 'Profil', 'Language': 'Dil', 'Save name': 'Adı yadda saxla', 'Find your team': 'Komandanı tap',
   'Tap a team to add it. Up to 5.': 'Əlavə etmək üçün komandaya toxun. 5-ə qədər.', 'Showing {n} of {m}. Type to find more.': '{m} komandadan {n} göstərilir. Digərləri üçün axtar.',
+  'Bet placed!': 'Mərc qəbul olundu!', '+{n} coins': '+{n} sikkə',
   'bets': 'mərc', 'Hide': 'Gizlət', '{n} more bets': '{n} əlavə mərc',
   'Bet details': 'Mərcin detalları', 'Bet not found.': 'Mərc tapılmadı.', 'Placed': 'Qoyulub', 'Picks': 'Seçimlər', 'Paid': 'Ödənildi',
   'Next {n} coins in': 'Növbəti {n} sikkəyə qalıb', 'at 00:00 your time': 'sənin saatınla 00:00-da', 'Rank': 'Yer', 'See all my bets': 'Bütün mərclərim',
@@ -65,7 +66,6 @@ const AZ = {
   'Live match ended': 'Canlı oyun bitdi', 'coins': 'sikkə',
   'Swapped your pick for this match. One pick per match.': 'Bu oyun üçün seçimin dəyişdirildi. Hər oyuna bir seçim.',
   'Max {n} picks. Even we have limits.': 'Ən çox {n} seçim. Bizim də limitimiz var.',
-  'Live bets are singles, so your slip now holds just this pick.': 'Canlı mərclər tək olur, kuponunda indi yalnız bu seçim var.',
   'Remove the picks that are closed first.': 'Əvvəlcə bağlanmış seçimləri sil.', 'Enter a stake of at least 1 coin.': 'Ən azı 1 sikkə məbləğ yaz.',
   'You only have {n} coins.': 'Cəmi {n} sikkən var.', 'Place this bet?': 'Bu mərci təsdiqləyirsən?', 'Place this live bet?': 'Bu canlı mərci təsdiqləyirsən?',
   'Place this {n}-pick multi-bet?': 'Bu {n} seçimli ekspressi təsdiqləyirsən?', 'Returns if it wins': 'Qalib gəlsə qazanc',
@@ -196,7 +196,7 @@ const SASS = {
     void: ["Match called off. Here are your {n} coins back. Even football didn't want your bet.", 'Refunded {n} coins. The universe saved you from yourself this time.'],
     claim: ['+100 coins. Your daily pity money has arrived.', 'Here are 100 coins. Try not to lose them all before lunch.', "100 free coins. The only income you'll see today.", 'Daily allowance received. Spend it irresponsibly.'],
     broke: ["You're broke. Come back tomorrow for your pity coins.", '0 coins. Impressive work, honestly.', 'Wallet empty. Have you considered a career in not betting?'],
-    place: ['Bet placed. The bookies are already celebrating.', 'Locked in. No refunds for bad decisions.', 'Bold. Brave. Probably wrong.', "Bet placed. We've queued the sad music, just in case.", "Done. May the odds be ever in your favour. They won't be."],
+    place: ['The bookies are already celebrating.', 'Locked in. No refunds for bad decisions.', 'Bold. Brave. Probably wrong.', "We've queued the sad music, just in case.", "Done. May the odds be ever in your favour. They won't be."],
     multi: ["A {n}-pick multi? You really enjoy losing, don't you.", '{n} picks. Bookmakers love people like you.'],
   },
   az: {
@@ -211,7 +211,7 @@ const SASS = {
     void: ['Oyun ləğv olundu. {n} sikkən geri qayıtdı. Futbol belə sənin mərcini istəmədi.', '{n} sikkə qaytarıldı. Kainat bu dəfə səni özündən xilas etdi.'],
     claim: ['+100 sikkə. Gündəlik təsəlli pulun gəldi.', 'Al, 100 sikkə. Naharadək hamısını uduzmamağa çalış.', '100 pulsuz sikkə. Bu gün görəcəyin yeganə gəlir.', 'Gündəlik xərclik gəldi. Məsuliyyətsizcəsinə xərclə.'],
     broke: ['Müflis oldun. Təsəlli sikkələri üçün sabah gəl.', '0 sikkə. Təsirli işdir, düzü.', 'Pulqabı boşdur. Heç mərc etməmək haqda düşünmüsən?'],
-    place: ['Mərc qəbul olundu. Bukmekerlər artıq bayram edir.', 'Təsdiqləndi. Pis qərarlar geri qaytarılmır.', 'Cəsarətli. Qəhrəmancasına. Yəqin ki, səhv.', 'Mərc qoyuldu. Hər ehtimala qarşı kədərli musiqini hazırladıq.', 'Hazırdır. Qoy şans səninlə olsun. Olmayacaq.'],
+    place: ['Bukmekerlər artıq bayram edir.', 'Təsdiqləndi. Pis qərarlar geri qaytarılmır.', 'Cəsarətli. Qəhrəmancasına. Yəqin ki, səhv.', 'Hər ehtimala qarşı kədərli musiqini hazırladıq.', 'Hazırdır. Qoy şans səninlə olsun. Olmayacaq.'],
     multi: ['{n} seçimli ekspress? Uduzmağı həqiqətən sevirsən.', '{n} seçim. Bukmekerlər səndən xoşlanır.'],
   },
 };

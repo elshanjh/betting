@@ -60,6 +60,19 @@ const legsOf = (b) => b.legs || [{ m: b.matchId, k: b.key, o: b.odds, label: b.l
 const isOpen = (m, now = Date.now()) => m && m.status === 'scheduled' && ms(m.ko) > now;
 const favs = () => (S.me && S.me.favs) || [];
 const isFav = (team) => favs().includes(team);
+// Bigger notice at the top for the moments that come with a joke.
+let noticeT;
+function notice(emoji, title, msg) {
+  const el = $('notice');
+  el.querySelector('.nt-e').textContent = emoji;
+  el.querySelector('b').textContent = title;
+  el.querySelector('p').textContent = msg;
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add('on'));
+  clearTimeout(noticeT);
+  noticeT = setTimeout(hideNotice, 5000);
+}
+function hideNotice() { const el = $('notice'); el.classList.remove('on'); setTimeout(() => { if (!el.classList.contains('on')) el.hidden = true; }, 250); }
 let toastT;
 function toast(msg) { const el = $('toast'); el.textContent = msg; el.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('on'), 3600); }
 
@@ -153,7 +166,7 @@ async function claim() {
   S.busy = true;
   try {
     await updateDoc(doc(db, 'players', S.user.uid), { coins: S.me.coins + DAILY_COINS, lastClaimDay: claimDay() });
-    toast(sass.claim());
+    notice('🪙', t('+{n} coins', { n: DAILY_COINS }), sass.claim());
   } catch (e) { failed(e, t('Already claimed today. Come back tomorrow.')); }
   S.busy = false;
 }
@@ -175,20 +188,14 @@ function applyLang(lang, persist) {
 /* ---------- bet slip ---------- */
 function setSlip(slip) { S.slip = slip; save('fs_slip', slip); renderSlip(); renderMatches(); renderLive(); }
 
+// Live and pre-match picks mix freely in one slip; one pick per match.
 function toggleLeg(mid, k) {
-  const live = k.startsWith('lv:');
-  if (live || S.slip.some((l) => l.live)) {
-    const same = S.slip.length === 1 && S.slip[0].m === mid && S.slip[0].k === k;
-    if (same) { setSlip([]); return; }
-    if (S.slip.length && (live || S.slip[0].live)) toast(t('Live bets are singles, so your slip now holds just this pick.'));
-    setSlip([live ? { m: mid, k, live: true } : { m: mid, k }]);
-    return;
-  }
+  const pick = k.startsWith('lv:') ? { m: mid, k, live: true } : { m: mid, k };
   const i = S.slip.findIndex((l) => l.m === mid);
   if (i >= 0 && S.slip[i].k === k) { setSlip(S.slip.filter((_, j) => j !== i)); return; }
-  if (i >= 0) { const s = S.slip.slice(); s[i] = { m: mid, k }; setSlip(s); toast(t('Swapped your pick for this match. One pick per match.')); return; }
+  if (i >= 0) { const s = S.slip.slice(); s[i] = pick; setSlip(s); toast(t('Swapped your pick for this match. One pick per match.')); return; }
   if (S.slip.length >= MAX_LEGS) { toast(t('Max {n} picks. Even we have limits.', { n: MAX_LEGS })); return; }
-  setSlip(S.slip.concat({ m: mid, k }));
+  setSlip(S.slip.concat(pick));
 }
 
 function slipState() {
@@ -218,7 +225,7 @@ function confirmPlace() {
   if (stake > S.me.coins) { toast(S.me.coins ? t('You only have {n} coins.', { n: S.me.coins }) : sass.broke()); return; }
   const ret = Math.round(stake * st.odds);
   S.confirmOdds = st.odds;
-  $('confirmTitle').textContent = st.live ? t('Place this live bet?') : st.legs.length > 1 ? t('Place this {n}-pick multi-bet?', { n: st.legs.length }) : t('Place this bet?');
+  $('confirmTitle').textContent = st.legs.length > 1 ? t('Place this {n}-pick multi-bet?', { n: st.legs.length }) : st.live ? t('Place this live bet?') : t('Place this bet?');
   $('confirmBody').innerHTML = '<ul>' + st.legs.map((l) => '<li><b>' + esc(l.label) + '</b> @ ' + fmtOdds(l.o) + '<br>' + esc(l.fx) + '</li>').join('') + '</ul>'
     + '<div class="sum"><span>' + t('Stake') + '</span><b class="num">' + stake + '</b><span>' + t('Odds') + '</span><b class="num">' + fmtOdds(st.odds) + '</b><span>' + t('Returns if it wins') + '</span><b class="num">' + ret + '</b></div>'
     + (st.legs.length > 1 ? '<small>' + t("Every pick has to win. One miss and it's gone.") + '</small>' : '')
@@ -249,7 +256,7 @@ async function place() {
     await b.commit();
     setSlip([]);
     openSheet(false);
-    toast(sass.place(legs.length));
+    notice('🎟️', t('Bet placed!'), sass.place(legs.length));
   } catch (e) { failed(e, st.live ? t('Live bet not accepted: the odds just moved or betting paused. Try again.') : t('Bet not accepted. A price may have just changed or a match kicked off. Check your slip and try again.')); }
   S.busy = false;
   renderSlip();
@@ -1015,7 +1022,6 @@ $('live').addEventListener('click', (e) => {
   if (!b.dataset.k) return;
   if (!S.me) { toast(t('Join the game first.')); return; }
   toggleLeg(b.dataset.mid, b.dataset.k);
-  if (window.innerWidth < 900 && S.slip.length) openSheet(true);
 });
 $('mine').addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -1041,6 +1047,7 @@ $('slip').addEventListener('input', (e) => {
 });
 $('slip').addEventListener('keydown', (e) => { if (e.target.id === 'stakeIn' && e.key === 'Enter') { e.preventDefault(); confirmPlace(); } });
 $('slipBar').addEventListener('click', () => openSheet(true));
+$('notice').addEventListener('click', hideNotice);
 $('scrim').addEventListener('click', () => openSheet(false));
 $('confirmDlg').addEventListener('close', () => { if ($('confirmDlg').returnValue === 'ok') place(); });
 
