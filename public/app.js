@@ -60,7 +60,6 @@ const legsOf = (b) => b.legs || [{ m: b.matchId, k: b.key, o: b.odds, label: b.l
 const isOpen = (m, now = Date.now()) => m && m.status === 'scheduled' && ms(m.ko) > now;
 const favs = () => (S.me && S.me.favs) || [];
 const isFav = (team) => favs().includes(team);
-const lgName = (m) => t(m.lg);
 let toastT;
 function toast(msg) { const el = $('toast'); el.textContent = msg; el.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('on'), 3600); }
 
@@ -354,7 +353,6 @@ function teamIndex() {
   });
   return o;
 }
-const GROUP_ORDER = (sk) => { const l = BY_SLUG[sk]; return l ? GROUPS.indexOf(l.group) * 100 + LEAGUES.indexOf(l) : 9999; };
 const teamLeague = (x) => (x && BY_SLUG[x.sk] ? '<span class="team-lg">' + flagOf(x.sk) + esc(t(BY_SLUG[x.sk].name)) + '</span>' : '');
 
 function openAccount() {
@@ -694,7 +692,7 @@ function renderMatches() {
 function liveCard(lv) {
   const sel = S.slip.find((l) => l.live && l.m === lv.id);
   const fresh = Date.now() - ms(lv.at) < 55e3, closed = lv.min >= 85;
-  let h = '<article class="lv' + (lv.susp || !fresh ? ' susp' : '') + '"><div class="lv-head"><span>' + (L ? L.flag + ' ' : '') + esc(t(lv.lg)) + '</span>'
+  let h = '<article class="lv' + (lv.susp || !fresh ? ' susp' : '') + '"><div class="lv-head"><span class="lv-lg">' + flagOf(lv.sk) + esc(t(lv.lg)) + '</span>'
     + '<span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span></div>'
     + '<div class="lv-score"><span class="tm">' + logo(lv.hl, lv.home) + '<span class="tn">' + esc(lv.home) + '</span></span><b>' + lv.sh + ' – ' + lv.sa + '</b><span class="tm away"><span class="tn">' + esc(lv.away) + '</span>' + logo(lv.al, lv.away) + '</span></div>';
   if (lv.susp || !fresh) h += '<div class="susp-note">' + (closed ? t('Live betting closed for the last minutes.') : !fresh ? t('Waiting for live data…') : '⚽ ' + t('Something happened. Betting paused for a moment.')) + '</div>';
@@ -715,7 +713,7 @@ function renderLive() {
   else if (!list.length) {
     const next = S.matches.filter((m) => isOpen(m)).sort((a, b) => ms(a.ko) - ms(b.ko))[0];
     h = '<div class="empty">' + t('No match is live right now.') + (next ? ' ' + t('Next kickoff: {m}, {w}.', { m: '<b>' + esc(next.home) + ' v ' + esc(next.away) + '</b>', w: esc(fmtWhen(next.ko)) }) : '') + ' ' + t('Live matches show up here with live odds, next goal and more.') + '</div>';
-  } else h = '<div class="list">' + list.map(liveCard).join('') + '</div>';
+  } else h = '<div class="list">' + list.map((lv) => { try { return liveCard(lv); } catch (e) { console.error(e); return ''; } }).join('') + '</div>';
   paint('live', h);
 }
 
