@@ -78,13 +78,12 @@ input[type=text],input[type=number],input[type=email],input[type=password],input
 .tabs{display:flex;gap:4px;background:var(--bar);border:1px solid var(--line);border-radius:10px;padding:4px;margin-bottom:12px}
 .tabs button{flex:1;border:0;background:transparent;border-radius:7px;padding:9px 6px;font-family:var(--display);font-weight:600;font-size:17px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:6px}
 .tabs button[aria-selected=true]{background:var(--card2);color:var(--ink)}
-.tabs .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);animation:pulse 1.6s infinite}
 @keyframes pulse{50%{opacity:.3}}
 .app{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
 .main{min-width:0;display:flex;flex-direction:column;gap:14px}
 .side{position:sticky;top:64px;min-width:0}
 .panel{min-width:0;display:none;flex-direction:column;gap:12px}
-.app[data-tab=bet] #p-bet,.app[data-tab=account] #p-account,.app[data-tab=matches] #p-matches,.app[data-tab=live] #p-live,.app[data-tab=mine] #p-mine,.app[data-tab=board] #p-board{display:flex}
+.app[data-tab=bet] #p-bet,.app[data-tab=account] #p-account,.app[data-tab=matches] #p-matches,.app[data-tab=mine] #p-mine,.app[data-tab=board] #p-board{display:flex}
 .ph{margin-top:2px}
 footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px}
 .app[data-tab=bet] footer,.app[data-tab=account] footer{display:none}
@@ -159,7 +158,6 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
 .fx-notes{display:flex;flex-wrap:wrap;gap:4px 12px;padding:0 12px 8px 74px;font-size:12px;color:var(--muted)}
 .crowd{color:var(--green);font-weight:600}
 .clock{color:#fff;background:var(--red);border-radius:3px;padding:0 6px;font-weight:700;font-size:12px;font-variant-numeric:tabular-nums}
-.livetag{color:var(--red);font-weight:700}
 
 /* expanded markets */
 .mk{background:var(--bg);border-top:1px solid var(--line);padding:10px 12px 14px;display:flex;flex-direction:column;gap:12px}
@@ -181,11 +179,6 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
 .pl-row .ob{padding:6px 4px}
 
 /* live rows */
-.live-fx .fx-time .clock{font-size:12px}
-.live-fx.paused .odds .ob{opacity:.45}
-.paused-note{color:var(--muted);font-weight:600}
-.live-fx .sels .ob{flex-direction:column;align-items:flex-start;gap:2px}
-.live-fx .sels .ob span{overflow-wrap:break-word;word-break:normal}
 
 /* live */
 .lv{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
@@ -399,16 +392,10 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 }
 /* The display font has no capital Ə, so Azerbaijani headings keep their case. */
 :lang(az) h1,:lang(az) h2,:lang(az) h3,:lang(az) h4,:lang(az) .block-h,:lang(az) .tabs button,:lang(az) .stat small,:lang(az) th,:lang(az) .pl-head,:lang(az) .ddl-g,:lang(az) .logo-name{text-transform:none}
-@media (prefers-reduced-motion:reduce){.tabs .dot{animation:none}.slip-wrap,#toast,#notice{transition:none}}
+@media (prefers-reduced-motion:reduce){.slip-wrap,#toast,#notice{transition:none}}
 
 /* live scores from ESPN */
 .clock.ft{background:var(--line);color:var(--ink)}
 .fx.goal{animation:goalflash 1.2s ease-in-out 3}
 .fx.goal .fx-score{color:var(--green)}
 @keyframes goalflash{50%{background:rgba(34,200,115,.18)}}
-.goal-note{color:var(--green);font-weight:700}
-.evs{padding:4px 12px 8px;display:grid;gap:3px;font-size:13px}
-.ev{display:grid;grid-template-columns:1fr 46px 1fr;align-items:center;gap:6px}
-.ev b{text-align:center;color:var(--muted);font-weight:600}
-.ev-l{text-align:right}
-.ev .rc{display:inline-block;width:8px;height:11px;background:var(--red);border-radius:1px;vertical-align:-1px}

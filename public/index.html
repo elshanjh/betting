@@ -36,7 +36,6 @@
 <div class="wrap">
   <nav class="tabs" id="tabs" aria-label="Sections">
     <button data-tab="matches" aria-selected="true"><span class="ti" aria-hidden="true">⚽</span><span data-i18n="Sports">Sports</span></button>
-    <button data-tab="live" aria-selected="false"><span class="ti" aria-hidden="true"><span class="dot"></span></span><span data-i18n="Live">Live</span> <span class="badge red" id="liveCount" hidden></span></button>
     <button data-tab="mine" aria-selected="false"><span class="ti" aria-hidden="true">🧾</span><span data-i18n="My bets">My bets</span> <span class="badge" id="openCount" hidden></span></button>
     <button data-tab="board" aria-selected="false"><span class="ti" aria-hidden="true">🏆</span><span data-i18n="Table">Table</span></button>
   </nav>
@@ -58,10 +57,6 @@
           <input type="search" id="search" data-i18n-ph="Search a team" placeholder="Search a team" autocomplete="off">
         </div>
         <div class="list" id="matches"></div>
-      </section>
-      <section class="panel" id="p-live">
-        <h2 class="ph" data-i18n="Live now">Live now</h2>
-        <div id="live"></div>
       </section>
       <section class="panel" id="p-mine">
         <h2 class="ph" data-i18n="My bets">My bets</h2>

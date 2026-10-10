@@ -1,4 +1,4 @@
-// Shared by sync.mjs (hourly) and live.mjs (during matches).
+// Used by sync.mjs (hourly odds, results and payouts).
 import { FieldValue } from 'firebase-admin/firestore';
 import { judge } from '../public/markets.js';
 

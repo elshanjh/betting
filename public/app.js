@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signI
 import { getFirestore, connectFirestoreEmulator, collection, doc, query, where, orderBy, limit, onSnapshot, setDoc, updateDoc,
   writeBatch, serverTimestamp, Timestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig, DAILY_COINS, DAY_OFFSET_HOURS } from './config.js';
-import { markets, halfMarkets, liveMarkets, comboOdds, matchOutcome, liveOutcome, MAX_LEGS } from './markets.js';
+import { markets, halfMarkets, comboOdds, matchOutcome, liveOutcome, MAX_LEGS } from './markets.js';
 import { LEAGUES, GROUPS, BY_SLUG, flagOf } from './leagues.js';
 import { t, mk, short, label, sass, getLang, setLang } from './i18n.js';
 import { fetchBoard, clockText } from './espn.js';
@@ -13,10 +13,10 @@ const $ = (id) => document.getElementById(id);
 const PAGE = 12;
 const S = {
   user: null, authed: false, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false,
-  myBets: [], feed: [], openBets: [], busy: false, live: {}, espn: {}, flash: {},
+  myBets: [], feed: [], openBets: [], busy: false, espn: {}, flash: {},
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null, cat: 'main',
-  slip: load('fs_slip', []), stake: 25, sheet: false, confirmOdds: 0,
-  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, liveExp: null, teamQ: '', teamLg: null, collapsed: new Set(load('fs_collapsed', [])),
+  slip: load('fs_slip', []).filter((l) => !l.live), stake: 25, sheet: false, confirmOdds: 0, // old live picks dropped
+  myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, teamQ: '', teamLg: null, collapsed: new Set(load('fs_collapsed', [])),
 };
 let mySub = null;
 const last = {};
@@ -187,11 +187,11 @@ function applyLang(lang, persist) {
 }
 
 /* ---------- bet slip ---------- */
-function setSlip(slip) { S.slip = slip; save('fs_slip', slip); renderSlip(); renderMatches(); renderLive(); }
+function setSlip(slip) { S.slip = slip; save('fs_slip', slip); renderSlip(); renderMatches(); }
 
-// Live and pre-match picks mix freely in one slip; one pick per match.
+// One pick per match.
 function toggleLeg(mid, k) {
-  const pick = k.startsWith('lv:') ? { m: mid, k, live: true } : { m: mid, k };
+  const pick = { m: mid, k };
   const i = S.slip.findIndex((l) => l.m === mid);
   if (i >= 0 && S.slip[i].k === k) { setSlip(S.slip.filter((_, j) => j !== i)); return; }
   if (i >= 0) { const s = S.slip.slice(); s[i] = pick; setSlip(s); toast(t('Swapped your pick for this match. One pick per match.')); return; }
@@ -202,35 +202,27 @@ function toggleLeg(mid, k) {
 function slipState() {
   const mm = matchMap(), now = Date.now();
   const legs = S.slip.map((l) => {
-    if (l.live) {
-      const lv = S.live[l.m], fresh = lv && now - ms(lv.at) < 55e3, moved = lv && scoreMoved(lv);
-      const ok = !!(lv && !lv.done && !lv.susp && fresh && !moved && lv.p && lv.p[l.k] != null);
-      return { ...l, lv, ok, o: ok ? lv.p[l.k] : null, label: lv ? label(l.k, lv.home, lv.away) : t('Live match ended'),
-        fx: lv ? lv.home + ' v ' + lv.away + ' · ' + lv.sh + '-' + lv.sa + ' ' + (lv.shown || '') : '',
-        why: !lv || lv.done ? t('match over, remove it') : lv.susp || moved ? t('suspended right now') : !fresh ? t('waiting for live data') : t('market closed') };
-    }
     const m = mm[l.m];
     const ok = isOpen(m, now) && m.p && m.p[l.k] != null;
     return { ...l, match: m, ok, o: ok ? m.p[l.k] : null, label: m ? label(l.k, m.home, m.away, m.pl) : t('Match no longer listed, remove it'), fx: m ? m.home + ' v ' + m.away : '' };
   });
   const good = legs.filter((l) => l.ok);
-  return { legs, good, bad: legs.length - good.length, live: legs.some((l) => l.live), odds: good.length ? comboOdds(good.map((l) => l.o)) : 0 };
+  return { legs, good, bad: legs.length - good.length, odds: good.length ? comboOdds(good.map((l) => l.o)) : 0 };
 }
 
 function confirmPlace() {
   const st = slipState(), stake = Math.floor(Number(S.stake));
   if (!S.me) { toast(t('Join the game first.')); return; }
   if (!st.legs.length) return;
-  if (st.bad) { toast(st.live ? t('Betting on this match is paused right now. Try again in a moment.') : t('Remove the picks that are closed first.')); return; }
+  if (st.bad) { toast(t('Remove the picks that are closed first.')); return; }
   if (!(stake >= 1)) { toast(t('Enter a stake of at least 1 coin.')); return; }
   if (stake > S.me.coins) { toast(S.me.coins ? t('You only have {n} coins.', { n: S.me.coins }) : sass.broke()); return; }
   const ret = Math.round(stake * st.odds);
   S.confirmOdds = st.odds;
-  $('confirmTitle').textContent = st.legs.length > 1 ? t('Place this {n}-pick multi-bet?', { n: st.legs.length }) : st.live ? t('Place this live bet?') : t('Place this bet?');
+  $('confirmTitle').textContent = st.legs.length > 1 ? t('Place this {n}-pick multi-bet?', { n: st.legs.length }) : t('Place this bet?');
   $('confirmBody').innerHTML = '<ul>' + st.legs.map((l) => '<li><b>' + esc(l.label) + '</b> @ ' + fmtOdds(l.o) + '<br>' + esc(l.fx) + '</li>').join('') + '</ul>'
     + '<div class="sum"><span>' + t('Stake') + '</span><b class="num">' + stake + '</b><span>' + t('Odds') + '</span><b class="num">' + fmtOdds(st.odds) + '</b><span>' + t('Returns if it wins') + '</span><b class="num">' + ret + '</b></div>'
-    + (st.legs.length > 1 ? '<small>' + t("Every pick has to win. One miss and it's gone.") + '</small>' : '')
-    + (st.live ? '<small>' + t('Live odds move fast. If a goal goes in within 2 minutes of your bet, it is refunded.') + '</small>' : '');
+    + (st.legs.length > 1 ? '<small>' + t("Every pick has to win. One miss and it's gone.") + '</small>' : '');
   $('confirmDlg').returnValue = '';
   $('confirmDlg').showModal();
 }
@@ -238,17 +230,12 @@ function confirmPlace() {
 async function place() {
   const st = slipState(), stake = Math.floor(Number(S.stake));
   if (S.busy || !st.legs.length || !(stake >= 1) || stake > S.me.coins) return;
-  if (st.bad) { toast(st.live ? t('Betting on this match is paused right now. Try again in a moment.') : t('A pick just closed. Check your slip.')); return; }
+  if (st.bad) { toast(t('A pick just closed. Check your slip.')); return; }
   if (st.odds !== S.confirmOdds) { toast(t('Odds moved to {o}. Check and confirm again.', { o: fmtOdds(st.odds) })); return; }
-  const legs = st.legs.map((l) => {
-    const leg = { m: l.m, k: l.k, o: l.o, label: l.label.slice(0, 120), fx: (l.live ? l.lv.home + ' v ' + l.lv.away : l.fx).slice(0, 120) };
-    if (l.live) { leg.sc = [l.lv.sh, l.lv.sa]; leg.t = l.lv.clk; }
-    return leg;
-  });
+  const legs = st.legs.map((l) => ({ m: l.m, k: l.k, o: l.o, label: l.label.slice(0, 120), fx: l.fx.slice(0, 120) }));
   const betRef = doc(collection(db, 'bets'));
   const b = writeBatch(db);
   const bet = { uid: S.user.uid, name: S.me.name, legs, mids: legs.map((l) => l.m), stake, odds: st.odds, status: 'open', placed: serverTimestamp() };
-  if (st.live) bet.live = true;
   b.set(betRef, bet);
   b.update(doc(db, 'players', S.user.uid), { coins: S.me.coins - stake, lastBet: betRef.id });
   S.busy = true;
@@ -258,7 +245,7 @@ async function place() {
     setSlip([]);
     openSheet(false);
     notice('🎟️', t('Bet placed!'), sass.place(legs.length));
-  } catch (e) { failed(e, st.live ? t('Live bet not accepted: the odds just moved or betting paused. Try again.') : t('Bet not accepted. A price may have just changed or a match kicked off. Check your slip and try again.')); }
+  } catch (e) { failed(e, t('Bet not accepted. A price may have just changed or a match kicked off. Check your slip and try again.')); }
   S.busy = false;
   renderSlip();
 }
@@ -306,7 +293,7 @@ function listen() {
     S.matches = snap.docs.map((d) => ({ ...d.data(), id: d.id })).filter((m) => m.p && m.ko && m.home && m.away);
     S.matchesLoaded = true;
     pollScores(true);
-    renderLeagues(); renderMatches(); renderSlip(); renderLive();
+    renderLeagues(); renderMatches(); renderSlip();
   }, (e) => { console.error(e); S.matchesLoaded = true; renderMatches(); }));
 
   subs.push(onSnapshot(collection(db, 'players'), (snap) => {
@@ -322,13 +309,6 @@ function listen() {
 
   listenMine();
 
-  subs.push(onSnapshot(query(collection(db, 'live'), where('done', '==', false)), (snap) => {
-    const o = {};
-    snap.docs.forEach((d) => { o[d.id] = { ...d.data(), id: d.id }; });
-    S.live = o;
-    renderLive(); renderSlip(); renderMatches(); renderMine();
-  }, (e) => console.error(e)));
-
   subs.push(onSnapshot(query(collection(db, 'bets'), orderBy('placed', 'desc'), limit(15)), (snap) => {
     S.feed = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
     renderBoard();
@@ -340,18 +320,15 @@ function listen() {
   }, (e) => console.error(e)));
 }
 
-// Scores and clock straight from ESPN every 15 seconds while the app is open,
-// for every league with a match on now. Much fresher than the live engine,
-// which GitHub only starts every so often.
-// Every 15s on the screens about live play, every 45s elsewhere to spare
-// phone data (about 7 KB per league per poll).
+// Scores and clock straight from ESPN while the app is open, for every
+// league with a match on now: every 15s on My bets, every 45s elsewhere to
+// spare phone data (about 7 KB per league per poll).
 let polling = false, polled = 0;
 async function pollScores(force) {
   if (polling || document.hidden || !S.user) return;
   const now = Date.now(), slugs = new Set();
-  if (!force && !['live', 'mine', 'bet'].includes($('app').dataset.tab) && now - polled < 44e3) return;
+  if (!force && !['mine', 'bet'].includes($('app').dataset.tab) && now - polled < 44e3) return;
   S.matches.forEach((m) => { if (m.status === 'scheduled' && m.sk && ms(m.ko) <= now + 120e3 && ms(m.ko) > now - 4 * 3600e3) slugs.add(m.sk); });
-  Object.values(S.live).forEach((lv) => { if (lv.sk) slugs.add(lv.sk); });
   if (!slugs.size) return;
   polling = true; polled = now;
   try {
@@ -363,25 +340,16 @@ async function pollScores(force) {
       next[id] = e;
     }));
     S.espn = next;
-    renderLive(); renderMatches(); renderSlip(); renderMine(); renderBetView();
+    renderMatches(); renderMine(); renderBetView();
   } finally { polling = false; }
 }
 
-// The live engine's score differs from what ESPN shows now: a goal it hasn't
-// priced yet, so its odds are stale.
-function scoreMoved(lv) {
-  const e = S.espn[lv.id];
-  return !!(e && e.state === 'in' && e.at > ms(lv.at) && (e.sh !== lv.sh || e.sa !== lv.sa));
-}
-
-// What the screen shows for a match in play: ESPN's score and running clock
-// when the browser has them, else the live engine's document.
+// What the screen shows for a match in play: ESPN's score and running clock.
 const ENDED = /FULL_TIME|FINAL/;
 function liveInfo(id) {
-  const e = S.espn[id], lv = S.live[id];
+  const e = S.espn[id];
   if (e && e.state === 'in') return { sh: e.sh, sa: e.sa, clock: clockText(e, Date.now(), t('HT')), tick: true, evs: e.evs };
   if (e && e.state === 'post' && ENDED.test(e.status)) return { sh: e.sh, sa: e.sa, clock: t('FT'), end: true, evs: e.evs };
-  if (lv) return { sh: lv.sh, sa: lv.sa, clock: lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'", evs: null };
   return null;
 }
 const clockTag = (id, info) => '<span class="clock' + (info.end ? ' ft' : '') + '"' + (info.tick ? ' data-clk="' + esc(id) + '"' : '') + '>' + esc(info.clock) + '</span>';
@@ -655,7 +623,7 @@ function marketTabs(m, sel) {
 
 function fixtureRow(m, now, mine, friends) {
   const open = isOpen(m, now), fin = m.status === 'final', lv = fin ? null : liveInfo(m.id);
-  const inSlip = S.slip.find((l) => !l.live && l.m === m.id), sel = inSlip ? inSlip.k : null;
+  const inSlip = S.slip.find((l) => l.m === m.id), sel = inSlip ? inSlip.k : null;
   let h = '<article class="fx' + (S.exp === m.id ? ' exp' : '') + (lv && goalNow(m.id) ? ' goal' : '') + '"><div class="fx-row' + (open ? ' tap' : '') + '"' + (open ? ' data-row="' + esc(m.id) + '"' : '') + '>'
     + '<div class="fx-time">' + (lv ? clockTag(m.id, lv) : '<b>' + esc(fmtTime(new Date(ms(m.ko)))) + '</b>')
     + (m.src === 'elo' && open ? '<span class="tag" title="' + esc(t('No bookmaker price yet; odds from World Football Elo ratings')) + '">Elo</span>' : '') + '</div>'
@@ -745,82 +713,6 @@ function renderMatches() {
   paint('matches', h);
 }
 
-// Live match as a compact row, like the main page: clock, teams, score,
-// live 1 X 2, and a "bets" button (or a tap on the row) for the rest.
-// Goals and red cards, home on the left and away on the right.
-function eventsHtml(evs) {
-  if (!evs || !evs.length) return '';
-  return '<div class="evs">' + evs.map((x) => {
-    const what = (x.g ? '⚽' : '<i class="rc"></i>') + ' <span>' + esc(x.name) + (x.og ? ' (' + t('o.g.') + ')' : x.pen ? ' (' + t('pen') + ')' : '') + '</span>';
-    return '<div class="ev ' + x.s + '"><span class="ev-l">' + (x.s === 'h' ? what : '') + '</span><b class="num">' + esc(x.min) + '</b><span class="ev-r">' + (x.s === 'a' ? what : '') + '</span></div>';
-  }).join('') + '</div>';
-}
-
-// lv is the engine's live document, or for a match ESPN shows in play that
-// the engine hasn't picked up, a stand-in with no prices (p: null).
-function liveRow(lv) {
-  const sel = S.slip.find((l) => l.live && l.m === lv.id), selK = sel ? sel.k : null;
-  const info = liveInfo(lv.id) || { sh: lv.sh, sa: lv.sa, clock: '' };
-  const noOdds = !lv.p, fresh = !noOdds && Date.now() - ms(lv.at) < 55e3, moved = !noOdds && scoreMoved(lv);
-  const closed = lv.min >= 85, paused = noOdds || lv.susp || !fresh || moved;
-  const p = lv.p || {}, exp = S.liveExp === lv.id;
-  const others = noOdds ? [] : liveMarkets(lv.home, lv.away, p).filter((g) => g.name !== 'Match result');
-  const nOther = others.reduce((n, g) => n + g.sels.length, 0);
-  const evs = eventsHtml(info.evs);
-  const team = (name, url) => '<div class="tm">' + logo(url, name) + '<span class="tn">' + esc(name) + '</span>' + (isFav(name) ? '<span class="star on">★</span>' : '') + '</div>';
-  let h = '<article class="fx live-fx' + (exp ? ' exp' : '') + (paused ? ' paused' : '') + (goalNow(lv.id) ? ' goal' : '') + '"><div class="fx-row tap" data-lrow="' + esc(lv.id) + '">'
-    + '<div class="fx-time">' + clockTag(lv.id, info) + '</div>'
-    + '<div class="fx-teams">' + team(lv.home, lv.hl) + team(lv.away, lv.al) + '</div>'
-    + '<div class="fx-score num live">' + info.sh + '<br>' + info.sa + '</div>'
-    + '<div class="odds">' + (closed ? '' : ['h', 'd', 'a'].map((x) => oddBtn(lv.id, 'lv:1x2:' + x, p['lv:1x2:' + x], x === 'h' ? '1' : x === 'd' ? 'X' : '2', selK, paused || p['lv:1x2:' + x] == null, label('lv:1x2:' + x, lv.home, lv.away))).join('')) + '</div>'
-    + (!nOther && !evs ? '<span></span>' : '<button class="more" data-lmore="' + esc(lv.id) + '" aria-expanded="' + exp + '">'
-      + (exp ? '<span>' + t('Hide') + '</span><b class="mchev up"></b>' : nOther && !closed ? '<span>' + t('bets') + '</span><b class="num">+' + nOther + '</b>' : '<span>' + t('Info') + '</span><b class="mchev"></b>') + '</button>')
-    + '</div>';
-  if (goalNow(lv.id)) h += '<div class="fx-notes"><span class="goal-note">⚽ ' + t('Goal!') + ' ' + info.sh + '-' + info.sa + '</span></div>';
-  else if (paused || closed) h += '<div class="fx-notes"><span class="paused-note">' + (closed ? t('Live betting closed for the last minutes.') : noOdds ? t('Live odds for this match are not open yet.') : moved || lv.susp ? '⚽ ' + t('Something happened. Betting paused for a moment.') : t('Waiting for live data…')) + '</span></div>';
-  if (exp) {
-    h += evs;
-    if (!closed && nOther) {
-      h += '<div class="mk">' + others.map((g) => '<div class="mk-g"><h4>' + esc(t(g.name)) + '</h4><div class="sels">'
-        + g.sels.map((x) => oddBtn(lv.id, x[0], p[x[0]], short(x[1]), selK, paused, label(x[0], lv.home, lv.away))).join('') + '</div></div>').join('') + '</div>';
-    }
-  }
-  return h + '</article>';
-}
-
-// Everything in play: the engine's live documents plus any listed match ESPN
-// shows in play. A match ESPN calls finished drops out even if the engine
-// hasn't caught up.
-function liveList() {
-  const out = {};
-  Object.values(S.live).forEach((lv) => { const e = S.espn[lv.id]; if (!(e && e.state === 'post')) out[lv.id] = lv; });
-  S.matches.forEach((m) => {
-    const e = S.espn[m.id];
-    if (!out[m.id] && m.status === 'scheduled' && e && e.state === 'in') out[m.id] = { id: m.id, sk: m.sk, lg: m.lg, home: m.home, away: m.away, hl: m.hl || '', al: m.al || '', ko: m.ko, sh: e.sh, sa: e.sa, min: 0, p: null };
-  });
-  return Object.values(out);
-}
-
-function renderLive() {
-  const F = favs();
-  const list = liveList().sort((a, b) => (F.includes(b.home) || F.includes(b.away)) - (F.includes(a.home) || F.includes(a.away)) || ms(a.ko) - ms(b.ko));
-  const badge = $('liveCount');
-  badge.hidden = !list.length; badge.textContent = list.length;
-  let h;
-  if (!S.user) h = '<div class="empty">' + t('Sign in to bet live.') + '</div>';
-  else if (!list.length) {
-    const next = S.matches.filter((m) => isOpen(m)).sort((a, b) => ms(a.ko) - ms(b.ko))[0];
-    h = '<div class="empty">' + t('No match is live right now.') + (next ? ' ' + t('Next kickoff: {m}, {w}.', { m: '<b>' + esc(next.home) + ' v ' + esc(next.away) + '</b>', w: esc(fmtWhen(next.ko)) }) : '') + ' ' + t('Live matches show up here with live odds, next goal and more.') + '</div>';
-  } else {
-    // One block, grouped by league like the main page (favourites first).
-    const groups = [];
-    list.forEach((lv) => { let g = groups.find((x) => x.sk === lv.sk); if (!g) groups.push(g = { sk: lv.sk, lg: lv.lg, items: [] }); g.items.push(lv); });
-    h = '<section class="block">' + groups.map((g) => leagueHead(g.sk, g.lg, g.items.length)
-      + (S.collapsed.has(g.sk) ? '' : g.items.map((lv) => { try { return liveRow(lv); } catch (e) { console.error(e); return ''; } }).join(''))).join('') + '</section>';
-  }
-  paint('live', h);
-}
-
 function renderSlip() {
   const st = slipState(), n = st.legs.length;
   let h = '<div class="slip-head"><h2>' + t('Bet slip') + (n ? ' <span class="badge">' + n + '</span>' : '') + '</h2><div>'
@@ -829,7 +721,7 @@ function renderSlip() {
   if (!n) h += '<div class="empty">' + t('Tap prices to add picks. Picks from different matches make a multi-bet: the odds multiply, and every pick has to win.') + '</div>';
   else {
     h += '<div class="slip-legs">' + st.legs.map((l, i) => '<div class="leg' + (l.ok ? '' : ' bad') + '"><div class="t">' + esc(l.label) + '</div>'
-      + '<div class="s">' + (l.live ? '<span class="livetag">' + t('LIVE') + '</span> ' : '') + (l.ok ? esc(l.fx) : l.live ? esc(l.fx) + ' · ' + l.why : (l.match ? esc(l.fx) + ' · ' + t('closed, remove it') : '')) + '</div>'
+      + '<div class="s">' + (l.ok ? esc(l.fx) : (l.match ? esc(l.fx) + ' · ' + t('closed, remove it') : '')) + '</div>'
       + '<div class="o num">' + (l.ok ? fmtOdds(l.o) : '–') + '</div><button class="x" data-rm="' + i + '" aria-label="×">×</button></div>').join('') + '</div>';
     const coins = S.me ? S.me.coins : 0, stake = Math.floor(Number(S.stake));
     h += '<div class="slip-total"><span>' + (n > 1 ? t('{n}-pick multi odds', { n }) : t('Odds')) + '</span><b class="num">' + (st.good.length ? fmtOdds(st.odds) : '–') + '</b></div>'
@@ -837,7 +729,7 @@ function renderSlip() {
       + [10, 25, 50].map((a) => '<button class="chip" data-amt="' + a + '"' + (a > coins ? ' disabled' : '') + '>' + a + '</button>').join('')
       + '<button class="chip" data-amt="' + coins + '"' + (coins ? '' : ' disabled') + '>' + t('All in') + '</button></div>'
       + '<div class="slip-ret">' + t('Returns') + ' <b class="num" id="retOut">' + (stake >= 1 && st.good.length ? Math.round(stake * st.odds) + ' ' + t('coins') : '–') + '</b></div>'
-      + '<button class="btn slip-place" data-place="1"' + (S.busy || (st.bad && !st.live) || !S.me ? ' disabled' : '') + '>' + (S.busy ? t('Placing…') : !S.me ? t('Join the game to bet') : t('Place bet')) + '</button>';
+      + '<button class="btn slip-place" data-place="1"' + (S.busy || st.bad || !S.me ? ' disabled' : '') + '>' + (S.busy ? t('Placing…') : !S.me ? t('Join the game to bet') : t('Place bet')) + '</button>';
   }
   const el = $('slip');
   if (last.slip !== h) {
@@ -870,8 +762,6 @@ function badge(st, size) {
 function legLabel(l) {
   const m = S.matches.find((x) => x.id === l.m);
   if (m) return label(l.k, m.home, m.away, m.pl);
-  const lv = S.live[l.m];
-  if (lv) return label(l.k, lv.home, lv.away);
   const fx = String(l.fx || '').split(' v ');
   if (fx.length === 2 && !/^(sc|fg|lv:sc)/.test(l.k)) return label(l.k, fx[0], fx[1]);
   return l.label;
@@ -924,10 +814,10 @@ function renderBetView() {
     + '<div><small>' + t('Placed') + '</small><b class="num" style="font-size:15px">' + esc(fmtWhen(b.placed)) + '</b></div></div>'
     + (legs.length > 1 ? '<small class="muted">' + t("Every pick has to win. One miss and it's gone.") + '</small>' : '') + '</div>';
   h += '<h3>' + t('Picks') + '</h3>' + legs.map((l, i) => {
-    const x = legState(b, l, i, mm), m = mm[l.m], lv = S.live[l.m];
-    const home = m ? m.home : lv ? lv.home : String(l.fx || '').split(' v ')[0], away = m ? m.away : lv ? lv.away : String(l.fx || '').split(' v ')[1] || '';
-    const hl = m ? m.hl : lv ? lv.hl : '', al = m ? m.al : lv ? lv.al : '';
-    const sk = m ? m.sk : lv ? lv.sk : null;
+    const x = legState(b, l, i, mm), m = mm[l.m];
+    const home = m ? m.home : String(l.fx || '').split(' v ')[0], away = m ? m.away : String(l.fx || '').split(' v ')[1] || '';
+    const hl = m ? m.hl : '', al = m ? m.al : '';
+    const sk = m ? m.sk : null;
     return '<div class="pick ' + x.st + '"><div class="pick-top"><div><div class="pick-sel">' + esc(legLabel(l)) + '</div></div><div class="pick-odds num">' + fmtOdds(l.o) + '</div></div>'
       + '<div class="pick-match"><span class="tm">' + logo(hl, home) + '<span class="tn">' + esc(home) + '</span></span><span class="pick-score num">' + esc(x.score || (legs.length === 1 && b.score) || '') + '</span>'
       + '<span class="tm">' + logo(al, away) + '<span class="tn">' + esc(away) + '</span></span></div>'
@@ -988,13 +878,12 @@ function renderBoard() {
   }).join('') + '</div>' : '<div class="empty">' + t('Nobody has placed a bet yet.') + '</div>');
 }
 
-function renderAll() { renderWallet(); renderLeagues(); renderMatches(); renderLive(); renderSlip(); renderMine(); renderBoard(); renderBetView(); renderAccount(); }
+function renderAll() { renderWallet(); renderLeagues(); renderMatches(); renderSlip(); renderMine(); renderBoard(); renderBetView(); renderAccount(); }
 
 /* ---------- events ---------- */
 function showTab(tab) {
   $('app').dataset.tab = tab;
   Array.from($('tabs').children).forEach((x) => x.setAttribute('aria-selected', x.dataset.tab === tab));
-  if (tab === 'live' && Date.now() - polled > 15e3) pollScores(true);
 }
 $('tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-tab]');
@@ -1091,19 +980,6 @@ $('matches').addEventListener('click', (e) => {
     toggleLeg(b.dataset.mid, b.dataset.k);
   }
 });
-$('live').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b) {
-    const r = e.target.closest('[data-lrow]');
-    if (r) { S.liveExp = S.liveExp === r.dataset.lrow ? null : r.dataset.lrow; renderLive(); }
-    return;
-  }
-  if (b.dataset.collapse) { toggleCollapse(b.dataset.collapse); renderLive(); return; }
-  if (b.dataset.lmore) { S.liveExp = S.liveExp === b.dataset.lmore ? null : b.dataset.lmore; renderLive(); return; }
-  if (!b.dataset.k) return;
-  if (!S.me) { toast(t('Join the game first.')); return; }
-  toggleLeg(b.dataset.mid, b.dataset.k);
-});
 $('mine').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
@@ -1139,11 +1015,11 @@ else {
   onAuthStateChanged(auth, (user) => {
     subs.splice(0).forEach((u) => u());
     if (mySub) { mySub(); mySub = null; }
-    Object.assign(S, { live: {}, user, authed: true, authMode: 'login', me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [], myLimit: 50 });
+    Object.assign(S, { user, authed: true, authMode: 'login', me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false, myBets: [], feed: [], openBets: [], myLimit: 50 });
     if (user) listen(); else showTab('matches');
     renderAll();
   });
-  setInterval(() => { if (S.me) renderWallet(); renderMatches(); renderLive(); renderSlip(); }, 15000);
+  setInterval(() => { if (S.me) renderWallet(); renderMatches(); renderSlip(); }, 15000);
   setInterval(pollScores, 15000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) pollScores(true); });
   // Running clocks tick every second without repainting the lists.
