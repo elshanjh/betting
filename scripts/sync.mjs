@@ -35,7 +35,7 @@ const ymd = (ms) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
 async function get(url, type = 'json') {
   for (let i = 0; ; i++) {
     try {
-      const res = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' } });
+      const res = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' }, signal: AbortSignal.timeout(15e3) });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return type === 'json' ? res.json() : res.text();
     } catch (e) {

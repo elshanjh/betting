@@ -20,6 +20,7 @@ No Cloud Functions are used, so you never need the paid Blaze plan.
 ```
 public/            the app (no build step)
   app.js           UI + Firestore reads/writes
+  espn.js          live scores polled from ESPN in the browser
   markets.js       odds model + settlement rules (shared with the sync job)
   config.js        your Firebase config goes here
 scripts/sync.mjs   odds + results + settlement (runs in GitHub Actions)
@@ -154,11 +155,19 @@ and live odds for the result, next goal, total goals, double chance and both
 teams to score. Live picks go in the same slip as pre-match ones, so a
 multi-bet can mix both (up to 6 picks).
 
-- `scripts/live.mjs` runs in GitHub Actions (`.github/workflows/live.yml`).
-  It wakes every 10 minutes; if a match is live or about to start it stays
-  up, polling ESPN every 20 seconds and writing `live/{matchId}`, until the
-  last match ends, then pays out immediately. Public repos get unlimited
-  free Actions minutes; on a private repo this would use up the free quota.
+- **Scores, clock and scorers** come straight from ESPN in each player's
+  browser, every 15 seconds while the app is open, with the clock ticking
+  every second in between (like SofaScore or FotMob). So scores stay live
+  even when the live engine isn't running.
+- **Live odds** come from `scripts/live.mjs`, which runs in GitHub Actions
+  (`.github/workflows/live.yml`). While a match is live it polls ESPN every
+  20 seconds and writes `live/{matchId}`; when a match ends it pays out
+  immediately. GitHub's schedule often starts runs hours late, so on match
+  days each run starts the next one itself when it ends. Public repos get
+  unlimited free Actions minutes; on a private repo this would use up the
+  free quota.
+- If the browser already sees a goal the engine hasn't priced yet, that
+  match's odds pause until the engine catches up.
 - Live odds come from the same goals model as the extra markets: the
   pre-match goal rates, scaled to the time left, on top of the score.
 - Betting pauses for a minute after a goal and closes at the 85th minute.
@@ -167,8 +176,8 @@ multi-bet can mix both (up to 6 picks).
   minutes of that clock (so someone could have seen it already), the bet is
   refunded. The rules only accept live bets at the current live price, from
   live data less than a minute old.
-- GitHub can start scheduled runs a few minutes late, so live odds may
-  appear a few minutes after kickoff.
+- If no run is going when a match kicks off, live odds for it open when the
+  next run starts (the scores show anyway).
 
 ## Multi-bets
 

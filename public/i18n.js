@@ -83,7 +83,7 @@ const AZ = {
   'Something happened. Betting paused for a moment.': 'Nəsə baş verdi. Mərclər bir anlıq dayandırılıb.',
   'No match is live right now.': 'Hazırda canlı oyun yoxdur.', 'Next kickoff: {m}, {w}.': 'Növbəti oyun: {m}, {w}.',
   'Live matches show up here with live odds, next goal and more.': 'Canlı oyunlar burada canlı əmsallar, növbəti qol və digər bazarlarla görünür.',
-  'HT': 'FS',
+  'HT': 'FS', 'FT': 'Bitdi', 'Info': 'Məlumat', 'Goal!': 'Qol!', 'o.g.': 'öz qapısına', 'pen': 'pen', 'Live odds for this match are not open yet.': 'Bu oyun üçün canlı əmsallar hələ açılmayıb.',
   // my bets
   'Waiting': 'Gözləyir', 'Won': 'Qazandı', 'Lost': 'Uduzdu', 'All': 'Hamısı', 'Record': 'Nəticə', 'Win rate': 'Qələbə faizi', 'Profit': 'Mənfəət',
   'Profit (shown)': 'Mənfəət (göstərilən)', 'Biggest win': 'Ən böyük qələbə', 'to win': 'qazanc', 'paid': 'ödənildi', 'lost': 'uduzuldu',

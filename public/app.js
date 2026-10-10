@@ -7,12 +7,13 @@ import { firebaseConfig, DAILY_COINS, DAY_OFFSET_HOURS } from './config.js';
 import { markets, halfMarkets, liveMarkets, comboOdds, matchOutcome, liveOutcome, MAX_LEGS } from './markets.js';
 import { LEAGUES, GROUPS, BY_SLUG, flagOf } from './leagues.js';
 import { t, mk, short, label, sass, getLang, setLang } from './i18n.js';
+import { fetchBoard, clockText } from './espn.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE = 12;
 const S = {
   user: null, authed: false, me: null, meLoaded: false, players: [], matches: [], matchesLoaded: false,
-  myBets: [], feed: [], openBets: [], busy: false, live: {},
+  myBets: [], feed: [], openBets: [], busy: false, live: {}, espn: {}, flash: {},
   league: 'all', day: 'all', q: '', shown: PAGE, showDone: false, exp: null, cat: 'main',
   slip: load('fs_slip', []), stake: 25, sheet: false, confirmOdds: 0,
   myLimit: 50, myMore: false, mineFilter: 'all', authMode: 'login', prevTab: 'matches', betId: null, liveExp: null, teamQ: '', teamLg: null, collapsed: new Set(load('fs_collapsed', [])),
@@ -202,11 +203,11 @@ function slipState() {
   const mm = matchMap(), now = Date.now();
   const legs = S.slip.map((l) => {
     if (l.live) {
-      const lv = S.live[l.m], fresh = lv && now - ms(lv.at) < 55e3;
-      const ok = !!(lv && !lv.done && !lv.susp && fresh && lv.p && lv.p[l.k] != null);
+      const lv = S.live[l.m], fresh = lv && now - ms(lv.at) < 55e3, moved = lv && scoreMoved(lv);
+      const ok = !!(lv && !lv.done && !lv.susp && fresh && !moved && lv.p && lv.p[l.k] != null);
       return { ...l, lv, ok, o: ok ? lv.p[l.k] : null, label: lv ? label(l.k, lv.home, lv.away) : t('Live match ended'),
         fx: lv ? lv.home + ' v ' + lv.away + ' · ' + lv.sh + '-' + lv.sa + ' ' + (lv.shown || '') : '',
-        why: !lv || lv.done ? t('match over, remove it') : lv.susp ? t('suspended right now') : !fresh ? t('waiting for live data') : t('market closed') };
+        why: !lv || lv.done ? t('match over, remove it') : lv.susp || moved ? t('suspended right now') : !fresh ? t('waiting for live data') : t('market closed') };
     }
     const m = mm[l.m];
     const ok = isOpen(m, now) && m.p && m.p[l.k] != null;
@@ -304,6 +305,7 @@ function listen() {
   subs.push(onSnapshot(query(collection(db, 'matches'), where('ko', '>=', since), orderBy('ko'), limit(1500)), (snap) => {
     S.matches = snap.docs.map((d) => ({ ...d.data(), id: d.id })).filter((m) => m.p && m.ko && m.home && m.away);
     S.matchesLoaded = true;
+    pollScores(true);
     renderLeagues(); renderMatches(); renderSlip(); renderLive();
   }, (e) => { console.error(e); S.matchesLoaded = true; renderMatches(); }));
 
@@ -337,6 +339,53 @@ function listen() {
     renderBoard(); renderMatches();
   }, (e) => console.error(e)));
 }
+
+// Scores and clock straight from ESPN every 15 seconds while the app is open,
+// for every league with a match on now. Much fresher than the live engine,
+// which GitHub only starts every so often.
+// Every 15s on the screens about live play, every 45s elsewhere to spare
+// phone data (about 7 KB per league per poll).
+let polling = false, polled = 0;
+async function pollScores(force) {
+  if (polling || document.hidden || !S.user) return;
+  const now = Date.now(), slugs = new Set();
+  if (!force && !['live', 'mine', 'bet'].includes($('app').dataset.tab) && now - polled < 44e3) return;
+  S.matches.forEach((m) => { if (m.status === 'scheduled' && m.sk && ms(m.ko) <= now + 120e3 && ms(m.ko) > now - 4 * 3600e3) slugs.add(m.sk); });
+  Object.values(S.live).forEach((lv) => { if (lv.sk) slugs.add(lv.sk); });
+  if (!slugs.size) return;
+  polling = true; polled = now;
+  try {
+    const boards = await Promise.all([...slugs].map((sk) => fetchBoard(sk).catch((e) => { console.warn(e.message); return {}; })));
+    const next = { ...S.espn };
+    boards.forEach((b) => Object.entries(b).forEach(([id, e]) => {
+      const old = S.espn[id];
+      if (old && e.sh + e.sa > old.sh + old.sa) S.flash[id] = now;
+      next[id] = e;
+    }));
+    S.espn = next;
+    renderLive(); renderMatches(); renderSlip(); renderMine(); renderBetView();
+  } finally { polling = false; }
+}
+
+// The live engine's score differs from what ESPN shows now: a goal it hasn't
+// priced yet, so its odds are stale.
+function scoreMoved(lv) {
+  const e = S.espn[lv.id];
+  return !!(e && e.state === 'in' && e.at > ms(lv.at) && (e.sh !== lv.sh || e.sa !== lv.sa));
+}
+
+// What the screen shows for a match in play: ESPN's score and running clock
+// when the browser has them, else the live engine's document.
+const ENDED = /FULL_TIME|FINAL/;
+function liveInfo(id) {
+  const e = S.espn[id], lv = S.live[id];
+  if (e && e.state === 'in') return { sh: e.sh, sa: e.sa, clock: clockText(e, Date.now(), t('HT')), tick: true, evs: e.evs };
+  if (e && e.state === 'post' && ENDED.test(e.status)) return { sh: e.sh, sa: e.sa, clock: t('FT'), end: true, evs: e.evs };
+  if (lv) return { sh: lv.sh, sa: lv.sa, clock: lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'", evs: null };
+  return null;
+}
+const clockTag = (id, info) => '<span class="clock' + (info.end ? ' ft' : '') + '"' + (info.tick ? ' data-clk="' + esc(id) + '"' : '') + '>' + esc(info.clock) + '</span>';
+const goalNow = (id) => Date.now() - (S.flash[id] || 0) < 60e3;
 
 // Own bets, newest first; "Load older bets" raises the limit.
 function listenMine() {
@@ -605,14 +654,14 @@ function marketTabs(m, sel) {
 }
 
 function fixtureRow(m, now, mine, friends) {
-  const open = isOpen(m, now), fin = m.status === 'final', lv = S.live[m.id];
+  const open = isOpen(m, now), fin = m.status === 'final', lv = fin ? null : liveInfo(m.id);
   const inSlip = S.slip.find((l) => !l.live && l.m === m.id), sel = inSlip ? inSlip.k : null;
-  let h = '<article class="fx' + (S.exp === m.id ? ' exp' : '') + '"><div class="fx-row' + (open ? ' tap' : '') + '"' + (open ? ' data-row="' + esc(m.id) + '"' : '') + '>'
-    + '<div class="fx-time">' + (lv ? '<span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span>' : '<b>' + esc(fmtTime(new Date(ms(m.ko)))) + '</b>')
+  let h = '<article class="fx' + (S.exp === m.id ? ' exp' : '') + (lv && goalNow(m.id) ? ' goal' : '') + '"><div class="fx-row' + (open ? ' tap' : '') + '"' + (open ? ' data-row="' + esc(m.id) + '"' : '') + '>'
+    + '<div class="fx-time">' + (lv ? clockTag(m.id, lv) : '<b>' + esc(fmtTime(new Date(ms(m.ko)))) + '</b>')
     + (m.src === 'elo' && open ? '<span class="tag" title="' + esc(t('No bookmaker price yet; odds from World Football Elo ratings')) + '">Elo</span>' : '') + '</div>'
     + '<div class="fx-teams">' + teamLine(m, 'h') + teamLine(m, 'a') + '</div>';
   if (fin) h += '<div class="fx-score num">' + m.sh + '<br>' + m.sa + '</div>';
-  else if (lv) h += '<div class="fx-score num live">' + lv.sh + '<br>' + lv.sa + '</div>';
+  else if (lv) h += '<div class="fx-score num' + (lv.end ? '' : ' live') + '">' + lv.sh + '<br>' + lv.sa + '</div>';
   h += '<div class="odds">' + (fin ? '' : ['h', 'd', 'a'].map((p) => oddBtn(m.id, '1x2:' + p, m.p['1x2:' + p], p === 'h' ? '1' : p === 'd' ? 'X' : '2', sel, !open, label('1x2:' + p, m.home, m.away))).join('')) + '</div>';
   h += open ? '<button class="more" data-more="' + esc(m.id) + '" aria-expanded="' + (S.exp === m.id) + '" aria-label="' + esc(S.exp === m.id ? t('Hide') : t('{n} more bets', { n: extraCount(m) })) + '">'
     + (S.exp === m.id ? '<span>' + t('Hide') + '</span><b class="mchev up"></b>' : '<span>' + t('bets') + '</span><b class="num">+' + extraCount(m) + '</b>') + '</button>' : '<span></span>';
@@ -698,32 +747,63 @@ function renderMatches() {
 
 // Live match as a compact row, like the main page: clock, teams, score,
 // live 1 X 2, and a "bets" button (or a tap on the row) for the rest.
+// Goals and red cards, home on the left and away on the right.
+function eventsHtml(evs) {
+  if (!evs || !evs.length) return '';
+  return '<div class="evs">' + evs.map((x) => {
+    const what = (x.g ? '⚽' : '<i class="rc"></i>') + ' <span>' + esc(x.name) + (x.og ? ' (' + t('o.g.') + ')' : x.pen ? ' (' + t('pen') + ')' : '') + '</span>';
+    return '<div class="ev ' + x.s + '"><span class="ev-l">' + (x.s === 'h' ? what : '') + '</span><b class="num">' + esc(x.min) + '</b><span class="ev-r">' + (x.s === 'a' ? what : '') + '</span></div>';
+  }).join('') + '</div>';
+}
+
+// lv is the engine's live document, or for a match ESPN shows in play that
+// the engine hasn't picked up, a stand-in with no prices (p: null).
 function liveRow(lv) {
   const sel = S.slip.find((l) => l.live && l.m === lv.id), selK = sel ? sel.k : null;
-  const fresh = Date.now() - ms(lv.at) < 55e3, closed = lv.min >= 85, paused = lv.susp || !fresh;
+  const info = liveInfo(lv.id) || { sh: lv.sh, sa: lv.sa, clock: '' };
+  const noOdds = !lv.p, fresh = !noOdds && Date.now() - ms(lv.at) < 55e3, moved = !noOdds && scoreMoved(lv);
+  const closed = lv.min >= 85, paused = noOdds || lv.susp || !fresh || moved;
   const p = lv.p || {}, exp = S.liveExp === lv.id;
-  const others = liveMarkets(lv.home, lv.away, p).filter((g) => g.name !== 'Match result');
+  const others = noOdds ? [] : liveMarkets(lv.home, lv.away, p).filter((g) => g.name !== 'Match result');
   const nOther = others.reduce((n, g) => n + g.sels.length, 0);
+  const evs = eventsHtml(info.evs);
   const team = (name, url) => '<div class="tm">' + logo(url, name) + '<span class="tn">' + esc(name) + '</span>' + (isFav(name) ? '<span class="star on">★</span>' : '') + '</div>';
-  let h = '<article class="fx live-fx' + (exp ? ' exp' : '') + (paused ? ' paused' : '') + '"><div class="fx-row tap" data-lrow="' + esc(lv.id) + '">'
-    + '<div class="fx-time"><span class="clock">' + esc(lv.status === 'STATUS_HALFTIME' ? t('HT') : lv.shown || lv.min + "'") + '</span></div>'
+  let h = '<article class="fx live-fx' + (exp ? ' exp' : '') + (paused ? ' paused' : '') + (goalNow(lv.id) ? ' goal' : '') + '"><div class="fx-row tap" data-lrow="' + esc(lv.id) + '">'
+    + '<div class="fx-time">' + clockTag(lv.id, info) + '</div>'
     + '<div class="fx-teams">' + team(lv.home, lv.hl) + team(lv.away, lv.al) + '</div>'
-    + '<div class="fx-score num live">' + lv.sh + '<br>' + lv.sa + '</div>'
+    + '<div class="fx-score num live">' + info.sh + '<br>' + info.sa + '</div>'
     + '<div class="odds">' + (closed ? '' : ['h', 'd', 'a'].map((x) => oddBtn(lv.id, 'lv:1x2:' + x, p['lv:1x2:' + x], x === 'h' ? '1' : x === 'd' ? 'X' : '2', selK, paused || p['lv:1x2:' + x] == null, label('lv:1x2:' + x, lv.home, lv.away))).join('')) + '</div>'
-    + (closed || !nOther ? '<span></span>' : '<button class="more" data-lmore="' + esc(lv.id) + '" aria-expanded="' + exp + '">'
-      + (exp ? '<span>' + t('Hide') + '</span><b class="mchev up"></b>' : '<span>' + t('bets') + '</span><b class="num">+' + nOther + '</b>') + '</button>')
+    + (!nOther && !evs ? '<span></span>' : '<button class="more" data-lmore="' + esc(lv.id) + '" aria-expanded="' + exp + '">'
+      + (exp ? '<span>' + t('Hide') + '</span><b class="mchev up"></b>' : nOther && !closed ? '<span>' + t('bets') + '</span><b class="num">+' + nOther + '</b>' : '<span>' + t('Info') + '</span><b class="mchev"></b>') + '</button>')
     + '</div>';
-  if (paused || closed) h += '<div class="fx-notes"><span class="paused-note">' + (closed ? t('Live betting closed for the last minutes.') : !fresh ? t('Waiting for live data…') : '⚽ ' + t('Something happened. Betting paused for a moment.')) + '</span></div>';
-  if (exp && !closed) {
-    h += '<div class="mk">' + others.map((g) => '<div class="mk-g"><h4>' + esc(t(g.name)) + '</h4><div class="sels">'
-      + g.sels.map((x) => oddBtn(lv.id, x[0], p[x[0]], short(x[1]), selK, paused, label(x[0], lv.home, lv.away))).join('') + '</div></div>').join('') + '</div>';
+  if (goalNow(lv.id)) h += '<div class="fx-notes"><span class="goal-note">⚽ ' + t('Goal!') + ' ' + info.sh + '-' + info.sa + '</span></div>';
+  else if (paused || closed) h += '<div class="fx-notes"><span class="paused-note">' + (closed ? t('Live betting closed for the last minutes.') : noOdds ? t('Live odds for this match are not open yet.') : moved || lv.susp ? '⚽ ' + t('Something happened. Betting paused for a moment.') : t('Waiting for live data…')) + '</span></div>';
+  if (exp) {
+    h += evs;
+    if (!closed && nOther) {
+      h += '<div class="mk">' + others.map((g) => '<div class="mk-g"><h4>' + esc(t(g.name)) + '</h4><div class="sels">'
+        + g.sels.map((x) => oddBtn(lv.id, x[0], p[x[0]], short(x[1]), selK, paused, label(x[0], lv.home, lv.away))).join('') + '</div></div>').join('') + '</div>';
+    }
   }
   return h + '</article>';
 }
 
+// Everything in play: the engine's live documents plus any listed match ESPN
+// shows in play. A match ESPN calls finished drops out even if the engine
+// hasn't caught up.
+function liveList() {
+  const out = {};
+  Object.values(S.live).forEach((lv) => { const e = S.espn[lv.id]; if (!(e && e.state === 'post')) out[lv.id] = lv; });
+  S.matches.forEach((m) => {
+    const e = S.espn[m.id];
+    if (!out[m.id] && m.status === 'scheduled' && e && e.state === 'in') out[m.id] = { id: m.id, sk: m.sk, lg: m.lg, home: m.home, away: m.away, hl: m.hl || '', al: m.al || '', ko: m.ko, sh: e.sh, sa: e.sa, min: 0, p: null };
+  });
+  return Object.values(out);
+}
+
 function renderLive() {
   const F = favs();
-  const list = Object.values(S.live).sort((a, b) => (F.includes(b.home) || F.includes(b.away)) - (F.includes(a.home) || F.includes(a.away)) || ms(a.ko) - ms(b.ko));
+  const list = liveList().sort((a, b) => (F.includes(b.home) || F.includes(b.away)) - (F.includes(a.home) || F.includes(a.away)) || ms(a.ko) - ms(b.ko));
   const badge = $('liveCount');
   badge.hidden = !list.length; badge.textContent = list.length;
   let h;
@@ -803,9 +883,9 @@ function legState(b, l, i, mm) {
   let st = (b.res && b.res[i]) || 'open';
   if (st === 'open' && m && m.status === 'final') st = l.k.startsWith('lv:') ? liveOutcome(l, m) : matchOutcome(l.k, m);
   if (st === 'open' && m && m.status === 'void') st = 'void';
-  const lv = S.live[l.m];
+  const lv = m && m.status === 'final' ? null : liveInfo(l.m);
   const started = m && m.status === 'scheduled' && ms(m.ko) <= Date.now();
-  const score = m && m.status === 'final' ? m.sh + '-' + m.sa : lv ? lv.sh + '-' + lv.sa + ' ' + (lv.shown || '') : started ? t('playing') : m && st === 'open' ? fmtWhen(m.ko) : '';
+  const score = m && m.status === 'final' ? m.sh + '-' + m.sa : lv ? lv.sh + '-' + lv.sa + ' ' + lv.clock : started ? t('playing') : m && st === 'open' ? fmtWhen(m.ko) : '';
   return { st, score };
 }
 
@@ -914,6 +994,7 @@ function renderAll() { renderWallet(); renderLeagues(); renderMatches(); renderL
 function showTab(tab) {
   $('app').dataset.tab = tab;
   Array.from($('tabs').children).forEach((x) => x.setAttribute('aria-selected', x.dataset.tab === tab));
+  if (tab === 'live' && Date.now() - polled > 15e3) pollScores(true);
 }
 $('tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-tab]');
@@ -1063,6 +1144,13 @@ else {
     renderAll();
   });
   setInterval(() => { if (S.me) renderWallet(); renderMatches(); renderLive(); renderSlip(); }, 15000);
+  setInterval(pollScores, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollScores(true); });
+  // Running clocks tick every second without repainting the lists.
+  setInterval(() => {
+    const now = Date.now();
+    document.querySelectorAll('[data-clk]').forEach((el) => { const e = S.espn[el.dataset.clk]; if (e && e.state === 'in') { const c = clockText(e, now, t('HT')); if (el.textContent !== c) el.textContent = c; } });
+  }, 1000);
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

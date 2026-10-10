@@ -1,17 +1,18 @@
 // Live engine: while matches are being played, polls ESPN every 20 seconds
 // and keeps a `live/{matchId}` document per match with the score, clock and
 // live prices, suspends betting around goals and late in the game, and
-// settles bets the moment a match ends. Started every 10 minutes by
-// .github/workflows/live.yml; stays up while a match is live or kicks off
-// within 90 minutes, and exits otherwise.
+// settles bets the moment a match ends. Started by .github/workflows/live.yml;
+// stays up while a match is live or kicks off within 7 hours (idle in
+// between), then hands over to a fresh run. Exits when nothing is near.
 //
 // Env: FIREBASE_SERVICE_ACCOUNT, LIVE_GROUPS (comma list of league groups
-// from public/leagues.js; default below), MAX_MINUTES (default 340).
+// from public/leagues.js; default below), MAX_MINUTES (default 320).
 
 import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { livePrices, LIVE_CLOSE_MIN } from '../public/markets.js';
 import { LEAGUES } from '../public/leagues.js';
+import { appendFileSync } from 'node:fs';
 import { parse, settle, playedIds } from './lib.mjs';
 
 const env = process.env;
@@ -25,7 +26,7 @@ const LEAD = 90 * 60e3;
 const IDLE_TICK = 60e3; // between matches: check once a minute, no ESPN calls
 const SPAN = 3 * 3600e3; // a match can't still be live this long after kickoff
 const GOAL_PAUSE = 60e3; // betting suspended this long after a goal
-const DEADLINE = Date.now() + Number(env.MAX_MINUTES || 340) * 60e3;
+const DEADLINE = Date.now() + Number(env.MAX_MINUTES || 320) * 60e3;
 const ONCE = env.LIVE_ONCE === '1'; // tests: a single tick
 
 const DONE = new Set(['STATUS_FULL_TIME', 'STATUS_FINAL', 'STATUS_FINAL_AET', 'STATUS_FINAL_PEN']);
@@ -37,7 +38,8 @@ const db = getFirestore();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function scoreboard(slug) {
-  const res = await fetch(API + '/' + slug + '/scoreboard', { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' } });
+  // A request that never answers once froze a run for 4 hours: always time out.
+  const res = await fetch(API + '/' + slug + '/scoreboard', { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' }, signal: AbortSignal.timeout(12e3) });
   if (!res.ok) throw new Error(slug + ' HTTP ' + res.status);
   return (await res.json()).events || [];
 }
@@ -102,22 +104,50 @@ async function candidates() {
   return snap.docs.map((d) => ({ ...d.data(), id: d.id })).filter((m) => m.status === 'scheduled' && SLUGS.has(m.sk) && m.o);
 }
 
+// Next kickoff the engine cares about within the horizon, or null. A small
+// read (at most 40 docs), done every half hour while idle.
+const HORIZON = 7 * 3600e3;
+async function nextKickoff() {
+  const now = Date.now();
+  const snap = await db.collection('matches').where('ko', '>=', Timestamp.fromMillis(now)).orderBy('ko').limit(40).get();
+  const m = snap.docs.map((d) => d.data()).find((x) => x.status === 'scheduled' && SLUGS.has(x.sk) && x.o);
+  return m && m.ko.toMillis() <= now + HORIZON ? m.ko.toMillis() : null;
+}
+
+// GitHub starts scheduled runs hours late, so on match days the workflow
+// starts its own next run (see live.yml) when this one ends.
+function handOver(again) {
+  console.log(again ? 'more matches soon: next run will take over' : 'no match soon: stopping until the next scheduled run');
+  if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, 'again=' + again + '\n');
+}
+
 async function main() {
   // Old live docs: tidy up anything finished more than a day ago.
   const old = await db.collection('live').where('at', '<', Timestamp.fromMillis(Date.now() - 864e5)).get();
   await Promise.all(old.docs.map((d) => d.ref.delete()));
 
-  let watch = [], loaded = 0;
+  let watch = [], loaded = 0, next = null, nextAt = 0;
   while (Date.now() < DEADLINE) {
     if (Date.now() - loaded > 5 * 60e3) { watch = await candidates(); loaded = Date.now(); }
     watch = watch.filter((m) => m.status === 'scheduled');
-    if (!watch.length) { console.log('nothing live or about to start'); break; }
+    if (!watch.length) {
+      if (Date.now() - nextAt > 30 * 60e3) { next = await nextKickoff(); nextAt = Date.now(); }
+      // A match later today: wait here for it rather than exit.
+      if (!next || ONCE) { console.log('nothing live or about to start'); break; }
+      await sleep(IDLE_TICK);
+      continue;
+    }
     const started = watch.some((m) => m.ko.toMillis() <= Date.now() + 60e3);
-    if (started) await tick(watch);
+    // Watchdog: a tick that hangs is abandoned and the loop carries on.
+    if (started) {
+      await Promise.race([tick(watch), sleep(90e3).then(() => console.error('tick took over 90s, moving on'))])
+        .catch((e) => console.error('tick failed: ' + e.message));
+    }
     if (ONCE) break;
     await sleep(started ? TICK : IDLE_TICK);
   }
   console.log('live engine stopping');
+  if (!ONCE) handOver(watch.length > 0 || (await nextKickoff()) != null);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

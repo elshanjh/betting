@@ -67,7 +67,7 @@ function bookOdds(c) {
 // Ids of players who started or came on, from the match summary; null if unknown.
 export async function playedIds(api, slug, eventId) {
   try {
-    const res = await fetch(api + '/' + slug + '/summary?event=' + eventId, { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' } });
+    const res = await fetch(api + '/' + slug + '/summary?event=' + eventId, { headers: { 'user-agent': 'Mozilla/5.0 friendly-stakes' }, signal: AbortSignal.timeout(15e3) });
     if (!res.ok) return null;
     const ids = [];
     ((await res.json()).rosters || []).forEach((t) => (t.roster || []).forEach((x) => { if (x.starter || x.subbedIn) ids.push(String(x.athlete?.id)); }));
